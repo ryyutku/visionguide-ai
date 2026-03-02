@@ -108,7 +108,8 @@ class DetectorTracker:
             return regions
 
 
-
+# yolov8s.pt   (small)
+# yolov8m.pt   (medium)
 detector = DetectorTracker("yolov8n.pt")
 
 cap = cv2.VideoCapture(0)
