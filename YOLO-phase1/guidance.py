@@ -1,8 +1,4 @@
 # guidance.py
-# Alert strategy:
-#   - Only speak when the scene CHANGES (new obstacle appears, zone changes, clears)
-#   - Repeat alerts on a slow interval only if situation persists
-#   - "Path clear" only fires once when center actually clears, not repeatedly
 
 import time
 import logging
@@ -17,44 +13,54 @@ PRIORITY_LOW    = 1
 
 class GuidanceEngine:
     def __init__(self):
-        # Cooldowns — minimum gap between same-type alerts
         self._cooldowns = {
-            "urgent":  4.0,   # repeat urgent alert max every 4s while blocked
-            "warning": 5.0,   # side-object warning
-            "clear":   8.0,   # periodic clear confirmation (infrequent)
+            "urgent":  4.0,
+            "warning": 5.0,
+            "clear":   8.0,
         }
-        self._last_said:   dict[str, float] = {}
+        self._last_said: dict[str, float] = {}
 
-        # Track previous scene to detect CHANGES
-        self._prev_center  = "clear"
-        self._prev_message = ""
-        self._cleared_announced = False  # so "path clear" only fires once per clearance
+        self._prev_center           = "clear"
+        self._cleared_announced     = False
 
-    def decide(self, state: SceneState) -> tuple[str | None, int]:
+    def decide(self, state: SceneState, speech=None) -> tuple[str | None, int]:
+        """
+        speech: optional SpeechEngine reference.
+        When passed, center alerts call say_urgent() which interrupts
+        any currently-playing side warning mid-sentence.
+        """
         now    = time.time()
         center = state.zones["center"]
         center_blocked = center in ("occupied", "crowded")
 
-        # ── 1. CENTER JUST BECAME BLOCKED (scene change → speak immediately) ─
+        # ── 1. CENTER JUST BECAME BLOCKED ────────────────────────────────
         if center_blocked and self._prev_center == "clear":
             msg = self._route_around(state)
-            self._prev_center = center
+            self._prev_center       = center
             self._cleared_announced = False
             self._last_said["urgent"] = now
+
             log.info("URGENT  %s  [new obstruction]", msg)
+
+            # Interrupt any side-warning that may be speaking right now
+            if speech:
+                speech.say_urgent(msg)
+                return msg, PRIORITY_HIGH   # guidance returns it for UI banner too
             return msg, PRIORITY_HIGH
 
-        # ── 2. CENTER STILL BLOCKED — repeat on slow interval ────────────────
+        # ── 2. CENTER STILL BLOCKED — repeat on slow interval ────────────
         if center_blocked:
-            self._prev_center = center
+            self._prev_center       = center
             self._cleared_announced = False
             msg = self._route_around(state)
             if self._allow("urgent", now):
                 log.info("URGENT  %s  [repeat]", msg)
+                if speech:
+                    speech.say_urgent(msg)
                 return msg, PRIORITY_HIGH
             return None, 0
 
-        # ── 3. CENTER JUST CLEARED — announce ONCE ───────────────────────────
+        # ── 3. CENTER JUST CLEARED ───────────────────────────────────────
         if not center_blocked and self._prev_center != "clear":
             self._prev_center = "clear"
             if not self._cleared_announced:
@@ -65,7 +71,7 @@ class GuidanceEngine:
 
         self._prev_center = "clear"
 
-        # ── 4. CLOSE OBJECT ON SIDE — warn once, not repeatedly ──────────────
+        # ── 4. CLOSE OBJECT ON SIDE ──────────────────────────────────────
         if (state.closest_proximity == "close"
                 and state.closest_region in ("left", "right")):
             side  = state.closest_region
@@ -76,8 +82,7 @@ class GuidanceEngine:
                 return msg, PRIORITY_MEDIUM
             return None, 0
 
-        # ── 5. Periodic clear — only if nothing happening for a while ────────
-        # Intentionally very infrequent so it's not annoying
+        # ── 5. Periodic clear ────────────────────────────────────────────
         if self._allow("clear", now):
             log.info("CLEAR   Path clear")
             return "Path clear", PRIORITY_LOW

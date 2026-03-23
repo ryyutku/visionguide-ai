@@ -20,7 +20,7 @@ log = logging.getLogger("main")
 from detector import DetectorTracker   # noqa: E402
 from scene    import SceneAnalyzer     # noqa: E402
 from guidance import GuidanceEngine    # noqa: E402
-from speech   import SpeechEngine      # noqa: E402
+from speech   import SpeechEngine, PRIORITY_HIGH      # noqa: E402
 
 
 def main():
@@ -42,11 +42,11 @@ def main():
 
         processed_frame, detections = detector.get_detections(frame)
         scene_state                 = scene.analyze(detections, frame.shape[1])
-        message, priority           = guidance.decide(scene_state)
+        message, priority           = guidance.decide(scene_state, speech)
 
         if message:
             log.info("[ALERT p%d] %s", priority, message)
-            speech.say(message, priority)
+            if priority < PRIORITY_HIGH: speech.say(message, priority)
 
         _draw_hud(processed_frame, scene_state, message)
 

@@ -22,7 +22,7 @@ log = logging.getLogger("ui")
 from detector import DetectorTracker
 from scene    import SceneAnalyzer
 from guidance import GuidanceEngine
-from speech   import SpeechEngine
+from speech   import SpeechEngine, PRIORITY_HIGH
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 BG        = "#0f0f0f"
@@ -204,11 +204,11 @@ class VisionGuideUI:
         if ret:
             processed, detections = self._detector.get_detections(frame)
             scene_state            = self._scene.analyze(detections, frame.shape[1])
-            message, priority      = self._guidance.decide(scene_state)
+            message, priority           = self._guidance.decide(scene_state, self._speech)
 
             if message:
                 log.info("[ALERT p%d] %s", priority, message)
-                self._speech.say(message, priority)
+                if priority < PRIORITY_HIGH: self._speech.say(message, priority)
                 self._alert_count += 1
 
                 tag = {3: "urgent", 2: "warning", 1: "clear"}.get(priority, "info")
