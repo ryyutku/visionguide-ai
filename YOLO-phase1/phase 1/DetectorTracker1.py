@@ -121,7 +121,7 @@ class DetectorTracker:
 
 # ---------------- MAIN ---------------- #
 
-detector = DetectorTracker("yolov8n.pt")
+detector = DetectorTracker("../yolov8n.pt")
 cap = cv2.VideoCapture(0)
 
 while True:
