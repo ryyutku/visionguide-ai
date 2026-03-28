@@ -1,0 +1,25 @@
+# VisualAid Indoor Detection Pipeline
+# Install with: pip install -r requirements.txt
+
+# FiftyOne - free COCO dataset download (no API key needed)
+fiftyone==0.25.1
+
+# YOLOv8 - includes torch, torchvision, opencv automatically
+ultralytics==8.3.0
+
+# PyTorch - CPU version (works on Raspberry Pi and most machines)
+# If you have an Nvidia GPU, get the CUDA version from https://pytorch.org
+torch==2.4.1
+torchvision==0.19.1
+
+# OpenCV
+opencv-python==4.10.0.84
+
+# Export formats
+onnx==1.16.2
+onnxruntime==1.19.2
+
+# Core utilities
+numpy==1.26.4
+Pillow==10.4.0
+tqdm==4.66.5
