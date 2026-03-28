@@ -1,0 +1,22 @@
+# Virtual environment
+venv/
+
+# IDE (PyCharm / IntelliJ)
+.idea/
+
+# Training outputs (YOLO runs, logs, checkpoints)
+runs/
+
+# Dataset (large files - should not be in git)
+visualaid_dataset/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
