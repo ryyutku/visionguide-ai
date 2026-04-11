@@ -1,16 +1,27 @@
-# run.py  —  Single launcher for the full VisionGuide system
+# run.py  —  VisionGuide launcher with decoupled pipeline
+#
+# 3 threads running in parallel:
+#
+#   CAPTURE   — reads camera as fast as possible, keeps only latest frame
+#               (drops stale frames so YOLO never processes old data)
+#
+#   INFERENCE — pulls latest frame, runs YOLO + guidance + sensor fusion
+#               logs actual FPS every 5s so you can see performance
+#
+#   SERVER    — Flask serves MJPEG + JSON, completely independent of YOLO
+#               the browser stream never stalls waiting for inference
 #
 # Usage:
-#   python run.py                 # default settings
+#   python run.py                 # camera 0, port 5000
 #   python run.py --camera 1      # if USB camera is /dev/video1
-#   python run.py --port 8080     # different port
-#   python run.py --show          # also open local cv2 window
+#   python run.py --port 8080
 
 import threading
 import logging
 import argparse
 import time
 import socket
+import queue
 
 for _noisy in ["comtypes", "comtypes.client", "comtypes.server",
                "PIL", "ultralytics", "torch", "urllib3",
@@ -18,14 +29,14 @@ for _noisy in ["comtypes", "comtypes.client", "comtypes.server",
     logging.getLogger(_noisy).setLevel(logging.CRITICAL)
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(name)-10s  %(message)s",
-    datefmt="%H:%M:%S",
+    level   = logging.INFO,
+    format  = "%(asctime)s  %(name)-10s  %(message)s",
+    datefmt = "%H:%M:%S",
 )
 log = logging.getLogger("run")
 
 
-def get_ip():
+def get_ip() -> str:
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -33,11 +44,45 @@ def get_ip():
         s.close()
         return ip
     except Exception:
-        return "unknown"
+        return "127.0.0.1"
 
 
-def run_navigation(camera_index, show):
+# ── Thread 1: Capture ─────────────────────────────────────────────────────────
+
+def capture_loop(camera_index: int, frame_queue: queue.Queue,
+                 stop: threading.Event):
     import cv2
+    cap = cv2.VideoCapture(camera_index)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)   # minimum buffer = freshest frames
+
+    if not cap.isOpened():
+        log.error("Cannot open camera %d — try --camera 1", camera_index)
+        stop.set()
+        return
+
+    log.info("Capture thread ready (camera %d)", camera_index)
+
+    while not stop.is_set():
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        # Keep only the latest frame — drop stale ones
+        if not frame_queue.empty():
+            try:
+                frame_queue.get_nowait()
+            except queue.Empty:
+                pass
+        frame_queue.put(frame)
+
+    cap.release()
+    log.info("Capture thread stopped")
+
+
+# ── Thread 2: Inference ───────────────────────────────────────────────────────
+
+def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
     from detector      import DetectorTracker
     from scene         import SceneAnalyzer
     from guidance      import GuidanceEngine
@@ -46,26 +91,22 @@ def run_navigation(camera_index, show):
     from sensor_fusion import SensorFusion
     import shared_state
 
-    detector = DetectorTracker("yolov8n.pt")
+    detector = DetectorTracker()   # auto-picks NCNN if available
     scene    = SceneAnalyzer()
     guidance = GuidanceEngine()
     speech   = SpeechEngine()
     sensor   = UltrasonicSensor()
     fusion   = SensorFusion()
 
-    cap = cv2.VideoCapture(camera_index)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    log.info("Inference thread ready")
 
-    if not cap.isOpened():
-        log.error("Cannot open camera %d — try --camera 1", camera_index)
-        return
+    frames_done = 0
+    fps_clock   = time.time()
 
-    log.info("Camera %d ready — navigation loop started", camera_index)
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
+    while not stop.is_set():
+        try:
+            frame = frame_queue.get(timeout=1.0)
+        except queue.Empty:
             continue
 
         processed, detections = detector.get_detections(frame)
@@ -86,52 +127,81 @@ def run_navigation(camera_index, show):
             scene_state, detections, message, priority, fused
         )
 
-        if show:
-            cv2.imshow("VisionGuide", processed)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+        # Report real FPS every 5 seconds
+        frames_done += 1
+        elapsed = time.time() - fps_clock
+        if elapsed >= 5.0:
+            log.info("Inference %.1f FPS", frames_done / elapsed)
+            frames_done = 0
+            fps_clock   = time.time()
 
     speech.shutdown()
     sensor.close()
-    cap.release()
-    if show:
-        cv2.destroyAllWindows()
+    log.info("Inference thread stopped")
 
 
-def run_server(port):
+# ── Thread 3: Flask server ────────────────────────────────────────────────────
+
+def server_loop(port: int):
     from server import app
     app.run(host="0.0.0.0", port=port, threaded=True,
             debug=False, use_reloader=False)
 
 
+# ── Entry point ───────────────────────────────────────────────────────────────
+
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="VisionGuide launcher")
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--port",   type=int, default=5000)
-    parser.add_argument("--show",   action="store_true")
     args = parser.parse_args()
 
     ip = get_ip()
     print()
-    print("  ╔══════════════════════════════════════════╗")
-    print(f"  ║  VisionGuide starting                    ║")
-    print(f"  ║  Open in browser:                        ║")
-    print(f"  ║  http://{ip}:{args.port}".ljust(45) + "║")
-    print("  ╚══════════════════════════════════════════╝")
+    print("  ╔══════════════════════════════════════════════╗")
+    print("  ║  VisionGuide                                 ║")
+    print(f"  ║  Dashboard → http://{ip}:{args.port}".ljust(49) + "║")
+    print(f"  ║  Camera    → index {args.camera}".ljust(49) + "║")
+    print("  ║  Ctrl+C to stop                              ║")
+    print("  ╚══════════════════════════════════════════════╝")
     print()
 
-    server_thread = threading.Thread(
-        target=run_server, args=(args.port,),
-        daemon=True, name="flask"
+    stop    = threading.Event()
+    frame_q = queue.Queue(maxsize=1)
+
+    # Start Flask first — browser can connect before camera is ready
+    flask_t = threading.Thread(
+        target=server_loop, args=(args.port,),
+        daemon=True, name="flask",
     )
-    server_thread.start()
-    time.sleep(1.5)   # let Flask bind before camera starts
-    log.info("Dashboard ready at http://%s:%d", ip, args.port)
+    flask_t.start()
+    time.sleep(1.2)
+    log.info("Dashboard → http://%s:%d", ip, args.port)
+
+    # Start capture
+    cap_t = threading.Thread(
+        target=capture_loop, args=(args.camera, frame_q, stop),
+        daemon=True, name="capture",
+    )
+    cap_t.start()
+
+    # Start inference
+    inf_t = threading.Thread(
+        target=inference_loop, args=(frame_q, stop),
+        daemon=True, name="inference",
+    )
+    inf_t.start()
 
     try:
-        run_navigation(args.camera, args.show)
+        while not stop.is_set():
+            time.sleep(0.5)
     except KeyboardInterrupt:
-        log.info("Stopped.")
+        log.info("Stopping...")
+        stop.set()
+
+    inf_t.join(timeout=5)
+    cap_t.join(timeout=3)
+    log.info("Stopped.")
 
 
 if __name__ == "__main__":
