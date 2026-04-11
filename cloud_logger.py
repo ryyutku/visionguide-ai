@@ -1,11 +1,19 @@
-# run.py  —  VisionGuide launcher
+# run.py  —  VisionGuide launcher with decoupled pipeline
 #
-# 3 threads: CAPTURE → INFERENCE → SERVER (Flask)
-# Cloud logging to Supabase runs inside INFERENCE (non-blocking queue).
+# 3 threads running in parallel:
+#
+#   CAPTURE   — reads camera as fast as possible, keeps only latest frame
+#               (drops stale frames so YOLO never processes old data)
+#
+#   INFERENCE — pulls latest frame, runs YOLO + guidance + sensor fusion
+#               logs actual FPS every 5s so you can see performance
+#
+#   SERVER    — Flask serves MJPEG + JSON, completely independent of YOLO
+#               the browser stream never stalls waiting for inference
 #
 # Usage:
-#   python run.py
-#   python run.py --camera 1
+#   python run.py                 # camera 0, port 5000
+#   python run.py --camera 1      # if USB camera is /dev/video1
 #   python run.py --port 8080
 
 import threading
@@ -39,24 +47,28 @@ def get_ip() -> str:
         return "127.0.0.1"
 
 
+# ── Thread 1: Capture ─────────────────────────────────────────────────────────
+
 def capture_loop(camera_index: int, frame_queue: queue.Queue,
                  stop: threading.Event):
     import cv2
     cap = cv2.VideoCapture(camera_index)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)   # minimum buffer = freshest frames
 
     if not cap.isOpened():
         log.error("Cannot open camera %d — try --camera 1", camera_index)
         stop.set()
         return
 
-    log.info("Capture ready (camera %d)", camera_index)
+    log.info("Capture thread ready (camera %d)", camera_index)
+
     while not stop.is_set():
         ret, frame = cap.read()
         if not ret:
             continue
+        # Keep only the latest frame — drop stale ones
         if not frame_queue.empty():
             try:
                 frame_queue.get_nowait()
@@ -65,8 +77,10 @@ def capture_loop(camera_index: int, frame_queue: queue.Queue,
         frame_queue.put(frame)
 
     cap.release()
-    log.info("Capture stopped")
+    log.info("Capture thread stopped")
 
+
+# ── Thread 2: Inference ───────────────────────────────────────────────────────
 
 def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
     from detector      import DetectorTracker
@@ -75,22 +89,19 @@ def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
     from speech        import SpeechEngine, PRIORITY_HIGH
     from ultrasonic    import UltrasonicSensor
     from sensor_fusion import SensorFusion
-    from cloud_logger  import CloudLogger
     import shared_state
 
-    detector = DetectorTracker()
+    detector = DetectorTracker()   # auto-picks NCNN if available
     scene    = SceneAnalyzer()
     guidance = GuidanceEngine()
     speech   = SpeechEngine()
     sensor   = UltrasonicSensor()
     fusion   = SensorFusion()
-    cloud    = CloudLogger()
 
-    log.info("Inference ready")
+    log.info("Inference thread ready")
 
     frames_done = 0
     fps_clock   = time.time()
-    sensor_tick = 0
 
     while not stop.is_set():
         try:
@@ -110,30 +121,13 @@ def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
             log.info("[ALERT p%d] %s", priority, message)
             if priority < PRIORITY_HIGH:
                 speech.say(message, priority)
-            cloud.log_alert(
-                message           = message,
-                priority          = priority,
-                zone_states       = scene_state.zones,
-                closest_class     = scene_state.closest_class,
-                closest_region    = scene_state.closest_region,
-                closest_proximity = scene_state.closest_proximity,
-            )
-
-        sensor_tick += 1
-        if sensor_tick >= 10:
-            sensor_tick = 0
-            cloud.log_sensor(
-                sensor_cm       = fused.sensor_cm if fused else None,
-                sensor_band     = fused.proximity if fused else "none",
-                object_count    = len(detections),
-                confirmed_count = sum(1 for d in detections if d["confirmed"]),
-            )
 
         shared_state.update_frame(processed)
         shared_state.update_state(
             scene_state, detections, message, priority, fused
         )
 
+        # Report real FPS every 5 seconds
         frames_done += 1
         elapsed = time.time() - fps_clock
         if elapsed >= 5.0:
@@ -141,11 +135,12 @@ def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
             frames_done = 0
             fps_clock   = time.time()
 
-    cloud.shutdown()
     speech.shutdown()
     sensor.close()
-    log.info("Inference stopped")
+    log.info("Inference thread stopped")
 
+
+# ── Thread 3: Flask server ────────────────────────────────────────────────────
 
 def server_loop(port: int):
     from server import app
@@ -153,8 +148,10 @@ def server_loop(port: int):
             debug=False, use_reloader=False)
 
 
+# ── Entry point ───────────────────────────────────────────────────────────────
+
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="VisionGuide launcher")
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--port",   type=int, default=5000)
     args = parser.parse_args()
@@ -172,20 +169,27 @@ def main():
     stop    = threading.Event()
     frame_q = queue.Queue(maxsize=1)
 
-    flask_t = threading.Thread(target=server_loop, args=(args.port,),
-                               daemon=True, name="flask")
+    # Start Flask first — browser can connect before camera is ready
+    flask_t = threading.Thread(
+        target=server_loop, args=(args.port,),
+        daemon=True, name="flask",
+    )
     flask_t.start()
     time.sleep(1.2)
     log.info("Dashboard → http://%s:%d", ip, args.port)
 
-    cap_t = threading.Thread(target=capture_loop,
-                             args=(args.camera, frame_q, stop),
-                             daemon=True, name="capture")
+    # Start capture
+    cap_t = threading.Thread(
+        target=capture_loop, args=(args.camera, frame_q, stop),
+        daemon=True, name="capture",
+    )
     cap_t.start()
 
-    inf_t = threading.Thread(target=inference_loop,
-                             args=(frame_q, stop),
-                             daemon=True, name="inference")
+    # Start inference
+    inf_t = threading.Thread(
+        target=inference_loop, args=(frame_q, stop),
+        daemon=True, name="inference",
+    )
     inf_t.start()
 
     try:

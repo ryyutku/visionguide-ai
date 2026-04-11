@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VisionGuide — Cloud Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:      #080c10;
+    --surface: #0d1117;
+    --s2:      #111820;
+    --border:  #1e2d3d;
+    --accent:  #00d4ff;
+    --green:   #0aff9d;
+    --urgent:  #ff4d4d;
+    --warning: #ffaa00;
+    --txt:     #cdd9e5;
+    --muted:   #4a5568;
+    --mono:    'Space Mono', monospace;
+    --sans:    'Syne', sans-serif;
+  }
+  * { box-sizing: border-box; margin:0; padding:0; }
+  body {
+    background: var(--bg); color: var(--txt);
+    font-family: var(--sans); min-height:100vh;
+  }
+
+  /* Setup overlay */
+  #setup {
+    position:fixed; inset:0; background:var(--bg);
+    display:flex; align-items:center; justify-content:center;
+    z-index:100;
+  }
+  .setup-card {
+    background: var(--surface); border:1px solid var(--border);
+    border-radius:8px; padding:36px; width:440px;
+  }
+  .setup-card h2 {
+    font-size:20px; font-weight:800; margin-bottom:6px; color:#fff;
+  }
+  .setup-card p { font-size:12px; color:var(--muted); margin-bottom:24px; line-height:1.6; }
+  .setup-card label { font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); display:block; margin-bottom:5px; }
+  .setup-card input {
+    width:100%; background:var(--s2); border:1px solid var(--border);
+    color:var(--txt); font-family:var(--mono); font-size:12px;
+    padding:9px 12px; border-radius:4px; margin-bottom:14px; outline:none;
+  }
+  .setup-card input:focus { border-color:var(--accent); }
+  .setup-card button {
+    width:100%; background:var(--accent); color:#000; border:none;
+    font-family:var(--sans); font-size:13px; font-weight:700;
+    padding:11px; border-radius:4px; cursor:pointer; letter-spacing:.05em;
+  }
+  .setup-card button:hover { opacity:.85; }
+  #setup-err { color:var(--urgent); font-size:11px; margin-top:10px; font-family:var(--mono); min-height:16px; }
+
+  /* Header */
+  header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 24px; background:var(--surface);
+    border-bottom:1px solid var(--border);
+  }
+  .logo { display:flex; align-items:center; gap:10px; }
+  .dot {
+    width:9px; height:9px; border-radius:50%;
+    background:var(--green); box-shadow:0 0 8px var(--green);
+    animation: blink 2s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%,100%{opacity:1;box-shadow:0 0 8px var(--green);}
+    50%{opacity:.4;box-shadow:0 0 16px var(--green);}
+  }
+  .logo h1 { font-size:17px; font-weight:800; letter-spacing:.07em; color:#fff; }
+  .logo h1 span { color:var(--accent); }
+  .badge {
+    background:rgba(0,212,255,.1); border:1px solid rgba(0,212,255,.3);
+    color:var(--accent); font-family:var(--mono); font-size:9px;
+    letter-spacing:.1em; padding:3px 9px; border-radius:3px;
+  }
+
+  /* Main grid */
+  .main { max-width:1200px; margin:0 auto; padding:20px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+
+  .card {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:6px; padding:18px;
+  }
+  .card.wide { grid-column: span 3; }
+  .card.two  { grid-column: span 2; }
+
+  .card-title {
+    font-size:8px; font-weight:600; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--muted); margin-bottom:14px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .card-title::after { content:''; flex:1; height:1px; background:var(--border); }
+
+  /* Stats row */
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .stat { background:var(--s2); border:1px solid var(--border); border-radius:4px; padding:12px; }
+  .stat-label { font-size:8px; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
+  .stat-val   { font-family:var(--mono); font-size:28px; font-weight:700; color:#fff; line-height:1; }
+
+  /* Alert log */
+  .log-list { display:flex; flex-direction:column; gap:4px; max-height:320px; overflow-y:auto;
+    scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+  .log-entry {
+    display:flex; gap:10px; align-items:flex-start;
+    padding:7px 10px; border-radius:3px; background:var(--s2);
+    border-left:2px solid var(--border);
+  }
+  .lp3 { border-left-color:var(--urgent);  background:rgba(255,77,77,.06); }
+  .lp2 { border-left-color:var(--warning); background:rgba(255,170,0,.05); }
+  .lp1 { border-left-color:var(--accent);  background:rgba(0,212,255,.04); }
+  .ltime { font-family:var(--mono); font-size:9px; color:var(--muted); white-space:nowrap; padding-top:1px; }
+  .lmsg  { font-family:var(--mono); font-size:11px; }
+  .ltag  { font-family:var(--mono); font-size:9px; padding:1px 6px; border-radius:2px; white-space:nowrap; }
+  .tp3 { background:rgba(255,77,77,.2); color:#ff6b6b; }
+  .tp2 { background:rgba(255,170,0,.2); color:var(--warning); }
+  .tp1 { background:rgba(0,212,255,.2); color:var(--accent); }
+
+  /* Sensor chart */
+  #sensor-canvas { width:100%; height:120px; display:block; }
+
+  /* Zone pills */
+  .zone-row { display:flex; gap:8px; margin-bottom:8px; }
+  .zpill {
+    flex:1; text-align:center; padding:8px 4px; border-radius:4px;
+    border:1px solid var(--border);
+    font-family:var(--mono); font-size:9px; font-weight:700;
+    text-transform:uppercase; letter-spacing:.06em;
+  }
+  .zc { color:var(--green);   background:rgba(10,255,157,.06); border-color:rgba(10,255,157,.2); }
+  .zo { color:var(--warning); background:rgba(255,170,0,.06);  border-color:rgba(255,170,0,.2); }
+  .zr { color:var(--urgent);  background:rgba(255,77,77,.06);  border-color:rgba(255,77,77,.2); }
+
+  #last-update { font-family:var(--mono); font-size:10px; color:var(--muted); text-align:right; padding:4px 24px 12px; }
+
+  ::-webkit-scrollbar { width:3px; }
+  ::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+</style>
+</head>
+<body>
+
+<!-- Setup overlay -->
+<div id="setup">
+  <div class="setup-card">
+    <h2>VisionGuide Cloud Dashboard</h2>
+    <p>Enter your Supabase project credentials to connect.<br>
+       Find these in your Supabase project → Settings → API.</p>
+    <label>Supabase Project URL</label>
+    <input id="inp-url" type="text" placeholder="https://xxxx.supabase.co">
+    <label>Anon / Public Key</label>
+    <input id="inp-key" type="text" placeholder="eyJhbGciOi...">
+    <button onclick="connect()">Connect</button>
+    <div id="setup-err"></div>
+  </div>
+</div>
+
+<header>
+  <div class="logo">
+    <div class="dot"></div>
+    <h1>Vision<span>Guide</span></h1>
+  </div>
+  <span class="badge">☁ CLOUD DASHBOARD</span>
+</header>
+
+<div id="last-update">connecting...</div>
+
+<div class="main">
+
+  <div class="card wide">
+    <div class="card-title">Session Summary</div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Total Alerts</div><div class="stat-val" id="s-total">—</div></div>
+      <div class="stat"><div class="stat-label">Urgent</div><div class="stat-val" id="s-urgent" style="color:var(--urgent)">—</div></div>
+      <div class="stat"><div class="stat-label">Warnings</div><div class="stat-val" id="s-warn" style="color:var(--warning)">—</div></div>
+      <div class="stat"><div class="stat-label">Last Object</div><div class="stat-val" id="s-obj" style="font-size:14px;padding-top:6px">—</div></div>
+    </div>
+  </div>
+
+  <div class="card two">
+    <div class="card-title">Recent Alerts</div>
+    <div class="log-list" id="alert-log"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Latest Zone State</div>
+    <div class="zone-row">
+      <div class="zpill zc" id="z-left">left<br>—</div>
+      <div class="zpill zc" id="z-center">center<br>—</div>
+      <div class="zpill zc" id="z-right">right<br>—</div>
+    </div>
+    <div class="card-title" style="margin-top:14px">Sensor Distance (recent)</div>
+    <canvas id="sensor-canvas"></canvas>
+  </div>
+
+</div>
+
+<script>
+  let SUPA_URL = '', SUPA_KEY = '';
+  let lastAlertId = 0;
+  const PROX_CLS = {close:'tp3',medium:'tp2',far:'tp1'};
+  const ZONE_CLS = {clear:'zc',occupied:'zo',crowded:'zr'};
+
+  // Try to restore credentials from localStorage
+  window.onload = () => {
+    const u = localStorage.getItem('vg_url');
+    const k = localStorage.getItem('vg_key');
+    if (u && k) {
+      document.getElementById('inp-url').value = u;
+      document.getElementById('inp-key').value = k;
+    }
+  };
+
+  async function connect() {
+    const url = document.getElementById('inp-url').value.trim().replace(/\/+$/, '');
+    const key = document.getElementById('inp-key').value.trim();
+    const err = document.getElementById('setup-err');
+
+    if (!url || !key) { err.textContent = 'Both fields required.'; return; }
+
+    // Test connection
+    try {
+      const r = await fetch(`${url}/rest/v1/alerts?select=id&limit=1`, {
+        headers: { apikey: key, Authorization: `Bearer ${key}` }
+      });
+      if (!r.ok) { err.textContent = `Connection failed: ${r.status} — check URL and key.`; return; }
+    } catch(e) {
+      err.textContent = 'Network error — check URL.';
+      return;
+    }
+
+    SUPA_URL = url; SUPA_KEY = key;
+    localStorage.setItem('vg_url', url);
+    localStorage.setItem('vg_key', key);
+    document.getElementById('setup').style.display = 'none';
+    poll();
+  }
+
+  async function supa(table, params = '') {
+    const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${params}`, {
+      headers: {
+        apikey: SUPA_KEY,
+        Authorization: `Bearer ${SUPA_KEY}`,
+        'Accept-Profile': 'public',
+      }
+    });
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }
+
+  function fmtTs(ts) {
+    return new Date(ts).toLocaleTimeString('en-GB', { hour12:false });
+  }
+
+  function setZone(id, status) {
+    const el = document.getElementById(id);
+    const name = id.replace('z-','');
+    el.className = `zpill ${ZONE_CLS[status]||'zc'}`;
+    el.innerHTML = `${name}<br>${status||'—'}`;
+  }
+
+  function addAlertRow(a) {
+    const list = document.getElementById('alert-log');
+    const cls  = a.priority >= 3 ? 'lp3' : a.priority === 2 ? 'lp2' : 'lp1';
+    const tcls = a.priority >= 3 ? 'tp3' : a.priority === 2 ? 'tp2' : 'tp1';
+    const e = document.createElement('div');
+    e.className = `log-entry ${cls}`;
+    e.innerHTML = `
+      <span class="ltime">${fmtTs(a.ts)}</span>
+      <span class="lmsg">${a.message}</span>
+      <span class="ltag ${tcls}">${a.closest_class||''}</span>
+    `;
+    list.insertBefore(e, list.firstChild);
+    while (list.children.length > 60) list.removeChild(list.lastChild);
+  }
+
+  // Simple canvas line chart for sensor distance
+  const canvas = document.getElementById('sensor-canvas');
+  const ctx    = canvas.getContext('2d');
+  let sensorHistory = [];
+
+  function drawSensor() {
+    const W = canvas.offsetWidth, H = 120;
+    canvas.width = W; canvas.height = H;
+    ctx.clearRect(0, 0, W, H);
+
+    if (sensorHistory.length < 2) return;
+
+    const vals = sensorHistory.map(r => r.sensor_cm).filter(v => v != null);
+    if (!vals.length) return;
+
+    const max = Math.max(...vals, 200);
+    const pts = sensorHistory
+      .filter(r => r.sensor_cm != null)
+      .map((r, i, arr) => ({
+        x: (i / (arr.length - 1)) * W,
+        y: H - (r.sensor_cm / max) * (H - 10) - 5,
+      }));
+
+    // Fill
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, H);
+    pts.forEach(p => ctx.lineTo(p.x, p.y));
+    ctx.lineTo(pts[pts.length-1].x, H);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(0,212,255,0.08)';
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.strokeStyle = 'rgba(0,212,255,0.8)';
+    ctx.lineWidth   = 1.5;
+    ctx.stroke();
+
+    // 45cm threshold line
+    const ty = H - (45 / max) * (H - 10) - 5;
+    ctx.beginPath();
+    ctx.setLineDash([4,4]);
+    ctx.moveTo(0, ty); ctx.lineTo(W, ty);
+    ctx.strokeStyle = 'rgba(255,77,77,0.5)';
+    ctx.lineWidth   = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = 'rgba(255,77,77,0.7)';
+    ctx.font = '9px Space Mono, monospace';
+    ctx.fillText('STOP (45cm)', 4, ty - 3);
+  }
+
+  async function poll() {
+    try {
+      // Fetch latest 30 alerts
+      const alerts = await supa('alerts',
+        'select=*&order=ts.desc&limit=30'
+      );
+
+      document.getElementById('s-total').textContent  = alerts.length;
+      document.getElementById('s-urgent').textContent = alerts.filter(a=>a.priority>=3).length;
+      document.getElementById('s-warn').textContent   = alerts.filter(a=>a.priority===2).length;
+
+      if (alerts.length) {
+        const latest = alerts[0];
+        document.getElementById('s-obj').textContent =
+          latest.closest_class || '—';
+        setZone('z-left',   latest.zone_left);
+        setZone('z-center', latest.zone_center);
+        setZone('z-right',  latest.zone_right);
+      }
+
+      // Add new alert rows (avoid duplicates)
+      const newAlerts = alerts.filter(a => a.id > lastAlertId);
+      newAlerts.reverse().forEach(a => addAlertRow(a));
+      if (newAlerts.length) lastAlertId = Math.max(...newAlerts.map(a=>a.id));
+
+      // Fetch latest sensor readings for chart
+      const sensors = await supa('sensor_readings',
+        'select=sensor_cm,ts&order=ts.desc&limit=60'
+      );
+      sensorHistory = sensors.reverse();
+      drawSensor();
+
+      document.getElementById('last-update').textContent =
+        'Last updated: ' + new Date().toLocaleTimeString('en-GB',{hour12:false});
+
+    } catch(e) {
+      document.getElementById('last-update').textContent = 'Connection error — retrying...';
+    }
+
+    setTimeout(poll, 2000);   // poll Supabase every 2 seconds
+  }
+</script>
+</body>
+</html>
