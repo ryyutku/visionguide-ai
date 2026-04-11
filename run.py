@@ -1,11 +1,8 @@
 # run.py  —  VisionGuide launcher
 #
-# 3 threads: CAPTURE → INFERENCE → SERVER (Flask)
-# Cloud logging to Supabase runs inside INFERENCE (non-blocking queue).
-#
 # Usage:
-#   python run.py
-#   python run.py --camera 1
+#   python run.py                  # auto-detects camera
+#   python run.py --camera 2       # force a specific camera index
 #   python run.py --port 8080
 
 import threading
@@ -39,24 +36,55 @@ def get_ip() -> str:
         return "127.0.0.1"
 
 
+def find_camera(preferred: int = None) -> int:
+    """
+    Returns the first working camera index.
+    If preferred is given, tries that first.
+    Searches indices 0-9.
+    """
+    import cv2
+    candidates = list(range(10))
+    if preferred is not None:
+        # Try preferred first, then the rest
+        candidates = [preferred] + [i for i in candidates if i != preferred]
+
+    for i in candidates:
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            ret, _ = cap.read()
+            cap.release()
+            if ret:
+                log.info("Camera found at index %d", i)
+                return i
+        cap.release()
+
+    return -1   # not found
+
+
+# ── Thread 1: Capture ─────────────────────────────────────────────────────────
+
 def capture_loop(camera_index: int, frame_queue: queue.Queue,
                  stop: threading.Event):
     import cv2
+
     cap = cv2.VideoCapture(camera_index)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
 
     if not cap.isOpened():
-        log.error("Cannot open camera %d — try --camera 1", camera_index)
+        log.error("Cannot open camera %d", camera_index)
         stop.set()
         return
 
     log.info("Capture ready (camera %d)", camera_index)
+
     while not stop.is_set():
         ret, frame = cap.read()
         if not ret:
+            time.sleep(0.05)
             continue
+        # Always keep only the latest frame
         if not frame_queue.empty():
             try:
                 frame_queue.get_nowait()
@@ -67,6 +95,8 @@ def capture_loop(camera_index: int, frame_queue: queue.Queue,
     cap.release()
     log.info("Capture stopped")
 
+
+# ── Thread 2: Inference ───────────────────────────────────────────────────────
 
 def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
     from detector      import DetectorTracker
@@ -147,24 +177,39 @@ def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
     log.info("Inference stopped")
 
 
+# ── Thread 3: Flask ───────────────────────────────────────────────────────────
+
 def server_loop(port: int):
     from server import app
     app.run(host="0.0.0.0", port=port, threaded=True,
             debug=False, use_reloader=False)
 
 
+# ── Main ──────────────────────────────────────────────────────────────────────
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--camera", type=int, default=0)
+    parser.add_argument("--camera", type=int, default=None,
+                        help="Camera index (auto-detected if not specified)")
     parser.add_argument("--port",   type=int, default=5000)
     args = parser.parse_args()
+
+    # Find camera before starting anything else
+    log.info("Scanning for camera...")
+    cam_index = find_camera(args.camera)
+    if cam_index == -1:
+        log.error("No working camera found.")
+        log.error("Check that your USB camera is plugged in, then run:")
+        log.error("  ls /dev/video*")
+        log.error("  python run.py --camera <index>")
+        return
 
     ip = get_ip()
     print()
     print("  ╔══════════════════════════════════════════════╗")
     print("  ║  VisionGuide                                 ║")
     print(f"  ║  Dashboard → http://{ip}:{args.port}".ljust(49) + "║")
-    print(f"  ║  Camera    → index {args.camera}".ljust(49) + "║")
+    print(f"  ║  Camera    → index {cam_index}".ljust(49) + "║")
     print("  ║  Ctrl+C to stop                              ║")
     print("  ╚══════════════════════════════════════════════╝")
     print()
@@ -179,7 +224,7 @@ def main():
     log.info("Dashboard → http://%s:%d", ip, args.port)
 
     cap_t = threading.Thread(target=capture_loop,
-                             args=(args.camera, frame_q, stop),
+                             args=(cam_index, frame_q, stop),
                              daemon=True, name="capture")
     cap_t.start()
 

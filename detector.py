@@ -1,13 +1,4 @@
 # detector.py
-#
-# Key performance changes vs previous version:
-#   • Auto-detects NCNN model if present (2-3x faster on Pi ARM)
-#   • YOLO input reduced to 320×320 (half the pixels = much faster,
-#     accuracy loss is minimal for navigation at walking pace)
-#   • Frame is resized BEFORE being passed to YOLO so OpenCV does the
-#     resize (fast, C++) not YOLO's internal Python resize
-#   • Camera buffer is flushed before each read so we always get the
-#     newest frame, not one that's been sitting in the buffer
 
 import cv2
 import os
@@ -20,42 +11,36 @@ IMPORTANT_CLASSES = {
     "couch", "potted plant", "bed", "toilet", "door"
 }
 
-CONFIRM_FRAMES = 3
-
-# YOLO input size — 320 is much faster than 640 on Pi with minimal accuracy loss
+CONFIRM_FRAMES  = 3
 YOLO_INPUT_SIZE = 320
 
 
-def _find_model() -> str:
-    """Use NCNN model if available, otherwise fall back to .pt"""
+def _find_model() -> tuple[str, str]:
+    """Returns (model_path, task). Uses NCNN if available."""
     ncnn = "yolov8n_ncnn_model"
     if os.path.exists(ncnn):
         print(f"[detector] Using NCNN model: {ncnn}  (faster)")
-        return ncnn
+        return ncnn, "detect"
     print("[detector] Using PyTorch model: yolov8n.pt")
     print("[detector] Tip: run 'python export_model.py' for 2-3x speedup")
-    return "yolov8n.pt"
+    return "yolov8n.pt", "detect"
 
 
 class DetectorTracker:
     def __init__(self, model_path: str = None):
-        path        = model_path or _find_model()
-        self.model  = YOLO(path)
-        self._smooth: dict[int, tuple]  = {}
-        self._seen:   dict[int, int]    = defaultdict(int)
+        if model_path:
+            path, task = model_path, "detect"
+        else:
+            path, task = _find_model()
+
+        # Pass task= explicitly to suppress the NCNN guess warning
+        self.model  = YOLO(path, task=task)
+        self._smooth: dict[int, tuple] = {}
+        self._seen:   dict[int, int]   = defaultdict(int)
         self.alpha  = 0.5
 
     def get_detections(self, frame):
-        """
-        Returns (annotated_frame, detections).
-        Frame is resized to YOLO_INPUT_SIZE here (fast OpenCV resize)
-        before being passed to YOLO, reducing inference time significantly.
-        """
-        # Resize to working resolution
-        frame = cv2.resize(frame, (YOLO_INPUT_SIZE * 4 // 3, YOLO_INPUT_SIZE))
-        # Use 4:3 closest to 320: 426×320 → keeps aspect ratio
-        # Actually just use square crop of centre for consistency:
-        frame = cv2.resize(frame, (640, 480))   # display resolution
+        frame = cv2.resize(frame, (640, 480))
         h, w  = frame.shape[:2]
 
         l_bound    = w / 3
@@ -64,11 +49,11 @@ class DetectorTracker:
 
         results = self.model.track(
             frame,
-            persist   = True,
-            verbose   = False,
-            conf      = 0.40,
-            iou       = 0.45,
-            imgsz     = YOLO_INPUT_SIZE,  # YOLO resizes internally to this
+            persist = True,
+            verbose = False,
+            conf    = 0.40,
+            iou     = 0.45,
+            imgsz   = YOLO_INPUT_SIZE,
         )
 
         detections: list = []
@@ -128,7 +113,6 @@ class DetectorTracker:
                             (int(x1), max(int(y1) - 8, 12)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
-        # Prune gone objects
         for tid in set(self._seen.keys()) - active_ids:
             self._seen.pop(tid, None)
             self._smooth.pop(tid, None)
