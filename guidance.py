@@ -1,15 +1,30 @@
-# guidance.py  —  Navigation guidance with sensor fusion support
+# guidance.py
 #
-# Accepts an optional FusedReading from sensor_fusion.py.
-# When fusion data is present:
-#   • Critical sensor distance immediately overrides everything → "Stop!"
-#   • Sensor floor (unseen obstacle) triggers a generic "obstacle ahead" warn
-#   • Sensor distance used to decide whether a "path clear" is trustworthy
-#     (only clear if BOTH camera center is empty AND sensor reads > DIST_CLOSE)
-#   • Proximity escalation uses real cm distance, not just bbox size band
+# Alert hierarchy — strictly one alert at a time, highest wins:
 #
-# Without fusion data (sensor=None) the engine falls back to camera-only
-# behaviour — identical to the laptop version.
+#   P3 STOP      — sensor < STOP_DISTANCE_CM (45cm / ~18 inches)
+#                  Bypasses everything including queue mode.
+#                  Cooldown: 3s so it doesn't repeat every frame.
+#
+#   P3 URGENT    — new confirmed object entered center zone
+#                  OR existing center object escalated closer
+#                  Cooldown: 6s for repeats
+#
+#   P2 WARNING   — close object on left/right side
+#                  Only fires once per object per proximity band
+#                  Cooldown: 7s
+#
+#   P1 CLEAR     — center has been empty for CLEAR_SUSTAIN_SECONDS
+#                  AND sensor reads > CLEAR_SENSOR_MIN_CM
+#                  Only fires if something was previously blocking
+#
+# Rules that prevent noise:
+#   • While a P3 alert is "active" (within ACTIVE_WINDOW seconds),
+#     P2 and P1 alerts are completely suppressed
+#   • Same object not re-announced within MIN_REANNOUNCE_GAP seconds
+#   • Objects kept in memory for GRACE_PERIOD after dropout (YOLO flicker)
+#   • Queue mode: object stationary in center > 8s → silent except for
+#     slow 20s reminders AND the hard stop still fires if sensor triggers
 
 import time
 import logging
@@ -22,11 +37,14 @@ PRIORITY_HIGH   = 3
 PRIORITY_MEDIUM = 2
 PRIORITY_LOW    = 1
 
-_PROX_RANK = {"far": 1, "medium": 2, "close": 3, "critical": 4, "none": 0}
+_PROX_RANK = {"none": 0, "far": 1, "medium": 2, "close": 3, "critical": 4}
+
+# Hard stop threshold — 45 cm ≈ 18 inches
+STOP_DISTANCE_CM = 45
 
 
 @dataclass
-class _ObjectMemory:
+class _Obj:
     track_id:           int
     obj_class:          str
     region:             str
@@ -39,75 +57,77 @@ class _ObjectMemory:
 
 class GuidanceEngine:
 
-    # ── Timing constants ──────────────────────────────────────────────────
-    COOLDOWN_URGENT  = 6.0
-    COOLDOWN_WARNING = 7.0
-    COOLDOWN_CLEAR   = 10.0
+    # Cooldowns
+    STOP_COOLDOWN         = 3.0   # "Stop!" repeat gap
+    COOLDOWN_URGENT       = 6.0
+    COOLDOWN_WARNING      = 7.0
+    COOLDOWN_CLEAR        = 12.0
+    SENSOR_FLOOR_COOLDOWN = 6.0
 
-    # Center must stay continuously empty for this long before saying "clear"
-    CLEAR_SUSTAIN_SECONDS = 2.5
+    # While a HIGH alert fired within this window, suppress lower alerts
+    ACTIVE_WINDOW = 4.0
 
-    # When sensor is present, require it to also read > DIST_CLOSE before clear
-    # (prevents false clears when sensor sees something camera missed)
-    CLEAR_SENSOR_MIN_CM = 90    # cm — must be beyond DIST_CLOSE (80 cm)
+    # "Path clear" only after center empty this long AND sensor agrees
+    CLEAR_SUSTAIN   = 2.5
+    CLEAR_SENSOR_CM = 90   # sensor must read > this to confirm clear
 
-    MIN_REANNOUNCE_GAP  = 5.0
-    OBJECT_GRACE_PERIOD = 2.5
+    # Same object silent for this long after announcement
+    MIN_REANNOUNCE  = 5.0
 
-    QUEUE_MODE_THRESHOLD    = 8.0
-    QUEUE_REMINDER_INTERVAL = 20.0
+    # Object kept in memory this long after disappearing (flicker tolerance)
+    GRACE_PERIOD    = 2.5
 
-    # How often to repeat the "obstacle ahead" sensor-floor warning
-    SENSOR_FLOOR_COOLDOWN = 5.0
+    # Queue mode
+    QUEUE_THRESHOLD = 8.0
+    QUEUE_INTERVAL  = 20.0
 
     def __init__(self):
-        self._objects: dict[int, _ObjectMemory] = {}
+        self._objects: dict[int, _Obj] = {}
 
-        self._last_urgent:       float = 0.0
-        self._last_warning:      float = 0.0
-        self._last_clear:        float = 0.0
-        self._last_sensor_floor: float = 0.0
+        self._last_stop:        float = 0.0
+        self._last_urgent:      float = 0.0
+        self._last_warning:     float = 0.0
+        self._last_clear:       float = 0.0
+        self._last_floor:       float = 0.0
 
-        self._was_blocked:         bool  = False
-        self._block_start:         float = 0.0
-        self._cleared_said:        bool  = False
-        self._prev_center_ids:     set   = set()
-        self._center_empty_since:  float | None = None
+        self._was_blocked:          bool        = False
+        self._block_start:          float       = 0.0
+        self._cleared_said:         bool        = False
+        self._prev_center_ids:      set         = set()
+        self._center_empty_since:   float | None = None
 
     # ── Public ────────────────────────────────────────────────────────────
 
-    def decide(self,
-               state:      SceneState,
-               detections: list,
-               speech=None,
-               fused=None   # FusedReading | None
-               ) -> tuple[str | None, int]:
-        """
-        fused : FusedReading from SensorFusion.fuse(), or None for camera-only.
-        """
+    def decide(self, state, detections, speech=None, fused=None):
         now = time.time()
-        self._sync_memory(detections, now)
+        self._sync(detections, now)
 
-        # ── 0. CRITICAL sensor override ──────────────────────────────────
-        if fused is not None and fused.proximity == "critical":
-            cm  = fused.sensor_cm
-            msg = f"Stop! Obstacle {int(cm)} centimetres ahead" if cm else "Stop! Obstacle ahead"
-            if now - self._last_urgent >= 3.0:   # don't scream every frame
-                self._last_urgent = now
-                log.warning("CRITICAL  %s  [sensor %.0f cm]", msg, cm or 0)
-                if speech:
-                    speech.say_urgent(msg)
-                return msg, PRIORITY_HIGH
-            return None, 0
+        # ── LEVEL 0: Hard stop (sensor < 45cm) ───────────────────────────
+        # This fires regardless of queue mode or any other state.
+        if fused is not None and fused.sensor_cm is not None:
+            if fused.sensor_cm < STOP_DISTANCE_CM:
+                if now - self._last_stop >= self.STOP_COOLDOWN:
+                    self._last_stop   = now
+                    self._last_urgent = now   # counts as urgent for suppression
+                    cm  = int(fused.sensor_cm)
+                    msg = f"Stop, obstacle {cm} centimetres ahead"
+                    log.warning("STOP  %s", msg)
+                    if speech:
+                        speech.say_urgent(msg)
+                    return msg, PRIORITY_HIGH
+                return None, 0
 
-        # ── 1. SENSOR FLOOR — unseen obstacle ────────────────────────────
+        last_high = max(self._last_stop, self._last_urgent)
+
+        # ── LEVEL 1: Sensor floor (unseen obstacle) ───────────────────────
         if fused is not None and fused.sensor_floor_active:
-            if now - self._last_sensor_floor >= self.SENSOR_FLOOR_COOLDOWN:
+            if now - self._last_floor >= self.SENSOR_FLOOR_COOLDOWN:
+                self._last_floor  = now
+                self._last_urgent = now
                 cm  = fused.sensor_cm
                 msg = (f"Obstacle ahead, {int(cm)} centimetres"
-                       if cm else "Obstacle ahead, not visible")
-                self._last_sensor_floor = now
-                log.info("SENSOR FLOOR  %s", msg)
+                       if cm else "Obstacle ahead")
+                log.info("FLOOR  %s", msg)
                 if speech:
                     speech.say_urgent(msg)
                 return msg, PRIORITY_HIGH
@@ -115,56 +135,45 @@ class GuidanceEngine:
 
         center_blocked = state.zones["center"] in ("occupied", "crowded")
 
-        # ── 2. CENTER BLOCKED ────────────────────────────────────────────
+        # ── LEVEL 2: Center blocked ───────────────────────────────────────
         if center_blocked:
             self._center_empty_since = None
             self._cleared_said       = False
-            msg, pri = self._handle_center_blocked(state, detections, now,
-                                                   speech, fused)
+            msg, pri = self._center_blocked(state, detections, now, speech, fused)
             if msg:
                 return msg, pri
             return None, 0
 
-        # ── 3. CENTER EMPTY — sustain check ─────────────────────────────
+        # ── Center just cleared ───────────────────────────────────────────
         if self._center_empty_since is None:
             self._center_empty_since = now
         time_empty = now - self._center_empty_since
 
-        if self._was_blocked and time_empty >= self.CLEAR_SUSTAIN_SECONDS:
-            # Also require sensor to agree (if available)
-            sensor_ok = (
-                fused is None
-                or fused.sensor_cm is None
-                or fused.sensor_cm >= self.CLEAR_SENSOR_MIN_CM
-            )
-            if sensor_ok and not self._cleared_said:
+        if self._was_blocked and time_empty >= self.CLEAR_SUSTAIN:
+            if self._sensor_ok(fused) and not self._cleared_said:
                 self._was_blocked     = False
                 self._block_start     = 0.0
                 self._prev_center_ids = set()
                 self._cleared_said    = True
                 self._last_clear      = now
-                log.info("CLEAR  Path clear, move forward  [sustained %.1fs]",
-                         time_empty)
+                log.info("CLEAR  Path clear")
                 return "Path clear, move forward", PRIORITY_LOW
 
         if not center_blocked:
             self._was_blocked = False
 
-        # ── 4. SIDE WARNING ──────────────────────────────────────────────
-        msg, pri = self._handle_side_warning(state, detections, now, fused)
-        if msg:
-            return msg, pri
+        # ── LEVEL 3: Side warning — suppressed if HIGH is recent ─────────
+        if now - last_high > self.ACTIVE_WINDOW:
+            msg, pri = self._side_warning(state, detections, now)
+            if msg:
+                return msg, pri
 
-        # ── 5. PERIODIC CLEAR ────────────────────────────────────────────
-        sensor_ok = (
-            fused is None
-            or fused.sensor_cm is None
-            or fused.sensor_cm >= self.CLEAR_SENSOR_MIN_CM
-        )
-        if (now - self._last_clear >= self.COOLDOWN_CLEAR
-                and self._was_previously_busy(now)
-                and time_empty >= self.CLEAR_SUSTAIN_SECONDS
-                and sensor_ok):
+        # ── LEVEL 4: Periodic clear ───────────────────────────────────────
+        if (now - last_high > self.ACTIVE_WINDOW
+                and now - self._last_clear >= self.COOLDOWN_CLEAR
+                and self._was_busy(now)
+                and time_empty >= self.CLEAR_SUSTAIN
+                and self._sensor_ok(fused)):
             self._last_clear = now
             return "Path clear", PRIORITY_LOW
 
@@ -172,19 +181,17 @@ class GuidanceEngine:
 
     # ── Internal ──────────────────────────────────────────────────────────
 
-    def _handle_center_blocked(self, state, detections, now, speech, fused):
+    def _center_blocked(self, state, detections, now, speech, fused):
         center_ids = {
             d["id"] for d in detections
             if d["confirmed"] and d["region"] == "center"
         }
 
-        new_ids = set()
-        for tid in center_ids - self._prev_center_ids:
-            mem = self._objects.get(tid)
-            if mem is None:
-                continue
-            if now - mem.announced_at >= self.MIN_REANNOUNCE_GAP:
-                new_ids.add(tid)
+        new_ids = {
+            tid for tid in center_ids - self._prev_center_ids
+            if tid in self._objects
+            and now - self._objects[tid].announced_at >= self.MIN_REANNOUNCE
+        }
 
         if not self._was_blocked:
             self._was_blocked  = True
@@ -194,42 +201,38 @@ class GuidanceEngine:
         self._prev_center_ids = center_ids
         time_blocked = now - self._block_start
 
-        # New object entered center
+        # New object
         if new_ids:
-            msg = self._route_around(state)
+            msg = self._route(state)
             self._last_urgent = now
             for tid in new_ids:
                 if tid in self._objects:
                     self._objects[tid].announced_at        = now
                     self._objects[tid].announcement_count += 1
-            log.info("URGENT  %s  [new center id=%s]", msg, new_ids)
+            log.info("URGENT  %s  [new %s]", msg, new_ids)
             if speech:
                 speech.say_urgent(msg)
             return msg, PRIORITY_HIGH
 
-        # Proximity escalation — prefer real cm distance when available
-        eid, emem = self._check_proximity_escalation(
-            center_ids, detections, fused
-        )
+        # Escalation
+        eid, emem = self._escalation(center_ids, detections, fused)
         if eid is not None:
-            cm_str = (f", {int(fused.sensor_cm)} centimetres away"
-                      if fused and fused.sensor_cm else "")
-            msg = f"{emem.obj_class} getting closer ahead{cm_str}, stop"
-            self._last_urgent          = now
-            emem.announced_at          = now
-            emem.announcement_count   += 1
+            msg = f"{emem.obj_class} getting closer, stop"
+            self._last_urgent        = now
+            emem.announced_at        = now
+            emem.announcement_count += 1
             log.info("URGENT  %s  [escalation id=%d]", msg, eid)
             if speech:
                 speech.say_urgent(msg)
             return msg, PRIORITY_HIGH
 
-        # Queue mode
-        if time_blocked >= self.QUEUE_MODE_THRESHOLD:
-            if now - self._last_urgent >= self.QUEUE_REMINDER_INTERVAL:
-                obj  = state.closest_class or "obstacle"
-                msg  = f"{obj} still ahead, wait or find alternate route"
+        # Queue mode — long-standing stationary obstacle
+        if time_blocked >= self.QUEUE_THRESHOLD:
+            if now - self._last_urgent >= self.QUEUE_INTERVAL:
+                obj = state.closest_class or "obstacle"
+                msg = f"{obj} still ahead, wait"
                 self._last_urgent = now
-                log.info("URGENT  %s  [queue mode]", msg)
+                log.info("URGENT  %s  [queue]", msg)
                 if speech:
                     speech.say_urgent(msg)
                 return msg, PRIORITY_HIGH
@@ -237,7 +240,7 @@ class GuidanceEngine:
 
         # Normal repeat
         if now - self._last_urgent >= self.COOLDOWN_URGENT:
-            msg = self._route_around(state)
+            msg = self._route(state)
             self._last_urgent = now
             log.info("URGENT  %s  [repeat]", msg)
             if speech:
@@ -246,125 +249,111 @@ class GuidanceEngine:
 
         return None, 0
 
-    def _handle_side_warning(self, state, detections, now, fused):
+    def _side_warning(self, state, detections, now):
         if state.closest_proximity != "close":
             return None, 0
         if state.closest_region not in ("left", "right"):
             return None, 0
 
         for d in detections:
-            if (d["confirmed"]
-                    and d["proximity"] == "close"
-                    and d["region"] == state.closest_region):
-
-                tid = d["id"]
-                mem = self._objects.get(tid)
-                if mem is None:
-                    continue
-
-                prev_rank      = _PROX_RANK.get(mem.last_proximity, 0)
-                curr_rank      = _PROX_RANK["close"]
-                just_escalated = curr_rank > prev_rank
-                first_alert    = mem.announcement_count == 0
-                timed_repeat   = now - mem.announced_at >= self.COOLDOWN_WARNING
-                global_ok      = now - self._last_warning >= self.COOLDOWN_WARNING
-
-                if (just_escalated or first_alert) and global_ok:
-                    side  = state.closest_region
-                    other = "right" if side == "left" else "left"
-                    msg   = f"{d['class']} close on your {side}, move {other}"
-                    self._last_warning      = now
-                    mem.last_proximity      = "close"
-                    mem.announced_at        = now
-                    mem.announcement_count += 1
-                    log.info("WARNING  %s  [id=%d]", msg, tid)
-                    return msg, PRIORITY_MEDIUM
-
-                elif timed_repeat and global_ok:
-                    side  = state.closest_region
-                    other = "right" if side == "left" else "left"
-                    msg   = f"{d['class']} on your {side}"
-                    self._last_warning = now
-                    mem.announced_at   = now
-                    log.info("WARNING  %s  [timed repeat id=%d]", msg, tid)
-                    return msg, PRIORITY_MEDIUM
-
-        return None, 0
-
-    def _check_proximity_escalation(self, center_ids, detections, fused):
-        for d in detections:
-            if d["id"] not in center_ids or not d["confirmed"]:
+            if (not d["confirmed"]
+                    or d["proximity"] != "close"
+                    or d["region"] != state.closest_region):
                 continue
+
             tid = d["id"]
             mem = self._objects.get(tid)
             if mem is None:
                 continue
 
-            # Use real sensor distance band when available
+            escalated  = _PROX_RANK["close"] > _PROX_RANK.get(mem.last_proximity, 0)
+            first      = mem.announcement_count == 0
+            repeat_ok  = now - mem.announced_at >= self.COOLDOWN_WARNING
+            global_ok  = now - self._last_warning >= self.COOLDOWN_WARNING
+            side       = state.closest_region
+            other      = "right" if side == "left" else "left"
+
+            if (escalated or first) and global_ok:
+                msg = f"{d['class']} close on your {side}, move {other}"
+                self._last_warning      = now
+                mem.last_proximity      = "close"
+                mem.announced_at        = now
+                mem.announcement_count += 1
+                log.info("WARNING  %s", msg)
+                return msg, PRIORITY_MEDIUM
+
+            elif repeat_ok and global_ok:
+                msg = f"{d['class']} on your {side}"
+                self._last_warning = now
+                mem.announced_at   = now
+                log.info("WARNING  %s  [repeat]", msg)
+                return msg, PRIORITY_MEDIUM
+
+        return None, 0
+
+    def _escalation(self, center_ids, detections, fused):
+        for d in detections:
+            if d["id"] not in center_ids or not d["confirmed"]:
+                continue
+            mem = self._objects.get(d["id"])
+            if mem is None:
+                continue
             if fused and fused.sensor_cm is not None:
                 from ultrasonic import DIST_CRITICAL, DIST_CLOSE, DIST_MEDIUM
                 cm = fused.sensor_cm
-                if   cm < DIST_CRITICAL: curr_band = "critical"
-                elif cm < DIST_CLOSE:    curr_band = "close"
-                elif cm < DIST_MEDIUM:   curr_band = "medium"
-                else:                    curr_band = "far"
+                band = ("critical" if cm < DIST_CRITICAL else
+                        "close"    if cm < DIST_CLOSE    else
+                        "medium"   if cm < DIST_MEDIUM   else "far")
             else:
-                curr_band = d["proximity"]
-
-            prev_rank = _PROX_RANK.get(mem.last_proximity, 0)
-            curr_rank = _PROX_RANK.get(curr_band, 0)
-            if curr_rank > prev_rank:
-                mem.last_proximity = curr_band
-                return tid, mem
-
+                band = d["proximity"]
+            if _PROX_RANK.get(band, 0) > _PROX_RANK.get(mem.last_proximity, 0):
+                mem.last_proximity = band
+                return d["id"], mem
         return None, None
 
-    def _sync_memory(self, detections, now):
-        active_ids = set()
+    def _sync(self, detections, now):
+        active = set()
         for d in detections:
             if not d["confirmed"]:
                 continue
             tid = d["id"]
-            active_ids.add(tid)
+            active.add(tid)
             if tid not in self._objects:
-                self._objects[tid] = _ObjectMemory(
-                    track_id       = tid,
-                    obj_class      = d["class"],
-                    region         = d["region"],
-                    last_proximity = d["proximity"],
-                    first_seen     = now,
-                    last_seen      = now,
+                self._objects[tid] = _Obj(
+                    track_id=tid, obj_class=d["class"],
+                    region=d["region"], last_proximity=d["proximity"],
+                    first_seen=now, last_seen=now,
                 )
             else:
                 self._objects[tid].region    = d["region"]
                 self._objects[tid].last_seen = now
 
-        to_delete = [
-            tid for tid, mem in self._objects.items()
-            if tid not in active_ids
-            and now - mem.last_seen > self.OBJECT_GRACE_PERIOD
-        ]
-        for tid in to_delete:
-            del self._objects[tid]
-        self._prev_center_ids -= set(to_delete)
+        gone = [t for t, m in self._objects.items()
+                if t not in active and now - m.last_seen > self.GRACE_PERIOD]
+        for t in gone:
+            del self._objects[t]
+        self._prev_center_ids -= set(gone)
 
-    def _was_previously_busy(self, now) -> bool:
-        return (now - self._last_urgent  < 30.0 or
-                now - self._last_warning < 30.0)
+    def _sensor_ok(self, fused) -> bool:
+        if fused is None or fused.sensor_cm is None:
+            return True
+        return fused.sensor_cm >= self.CLEAR_SENSOR_CM
 
-    def _route_around(self, state: SceneState) -> str:
-        ls  = self._zone_score(state.zones["left"])
-        rs  = self._zone_score(state.zones["right"])
+    def _was_busy(self, now) -> bool:
+        return (now - self._last_urgent  < 30.0
+                or now - self._last_warning < 30.0)
+
+    def _route(self, state) -> str:
+        ls  = self._score(state.zones["left"])
+        rs  = self._score(state.zones["right"])
         obj = state.closest_class or "obstacle"
         if ls == 0 and rs == 0:
-            d = "left" if state.zone_counts["left"] <= state.zone_counts["right"] else "right"
-            return f"{obj} ahead, move {d}"
-        if ls < rs:
-            return f"{obj} ahead, move left"
-        if rs < ls:
-            return f"{obj} ahead, move right"
+            side = ("left" if state.zone_counts["left"]
+                    <= state.zone_counts["right"] else "right")
+            return f"{obj} ahead, move {side}"
+        if ls < rs: return f"{obj} ahead, move left"
+        if rs < ls: return f"{obj} ahead, move right"
         return f"{obj} ahead, stop and wait"
 
     @staticmethod
-    def _zone_score(status: str) -> int:
-        return {"clear": 0, "occupied": 1, "crowded": 2}.get(status, 1)
+    def _score(status): return {"clear": 0, "occupied": 1, "crowded": 2}.get(status, 1)

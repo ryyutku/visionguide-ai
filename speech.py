@@ -1,16 +1,16 @@
 # speech.py
 #
-# Windows : persistent PowerShell + System.Speech (non-blocking, interrupt support)
-# Linux/Pi: espeak via subprocess (non-blocking, interrupt support)
-#           Install with:  sudo apt install espeak
+# Windows : persistent PowerShell + System.Speech
+# Linux/Pi: persistent espeak process (kept alive — no spawn delay per alert)
 #
-# Both backends support say_urgent() which cancels whatever is currently
-# playing and speaks immediately — critical for a navigation aid.
+# Both support say_urgent() which kills current audio and speaks immediately.
+# Install espeak on Pi:  sudo apt install espeak
 
 import threading
 import subprocess
 import sys
 import logging
+import queue
 
 log = logging.getLogger("speech")
 
@@ -46,40 +46,36 @@ class SpeechEngine:
         self._pending_pri  = 0
         self._event        = threading.Event()
         self._running      = True
+        self._ps_proc      = None
 
-        # Windows: persistent PowerShell process
-        self._ps_proc = None
         if IS_WINDOWS:
-            self._ps_proc = subprocess.Popen(
-                ["powershell", "-NoProfile", "-WindowStyle", "Hidden",
-                 "-NonInteractive", "-Command", _PS_INIT],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            self._ps_proc = self._start_ps()
             log.info("Speech engine ready (PowerShell)")
         else:
-            # Linux/Pi: check espeak is available
-            result = subprocess.run(["which", "espeak"], capture_output=True)
-            if result.returncode != 0:
-                log.warning(
-                    "espeak not found — run: sudo apt install espeak\n"
-                    "Speech will be silent until installed."
-                )
+            # Check espeak exists
+            r = subprocess.run(["which", "espeak"],
+                               capture_output=True)
+            if r.returncode != 0:
+                log.warning("espeak not found — run: sudo apt install espeak")
             else:
                 log.info("Speech engine ready (espeak)")
 
-        # Linux/Pi: track current espeak process so we can kill it for interrupts
+        # Single persistent espeak process on Linux
+        # We use a simple approach: kill + restart for interrupts,
+        # but keep the process alive between sequential utterances
+        # by writing to a queue that feeds one long-lived worker.
         self._espeak_proc = None
         self._espeak_lock = threading.Lock()
 
-        self._thread = threading.Thread(target=self._worker, daemon=True)
+        self._thread = threading.Thread(
+            target=self._worker, daemon=True, name="speech-worker"
+        )
         self._thread.start()
 
-    # ── Public API ────────────────────────────────────────────────────────
+    # ── Public ────────────────────────────────────────────────────────────
 
     def say(self, text: str, priority: int = PRIORITY_LOW):
-        """Queue a message. Higher priority replaces a pending lower-priority one."""
+        """Queue a message — replaces any pending lower-priority message."""
         with self._lock:
             if self._pending_text is None or priority >= self._pending_pri:
                 self._pending_text = text
@@ -87,25 +83,25 @@ class SpeechEngine:
                 self._event.set()
 
     def say_urgent(self, text: str):
-        """Interrupt whatever is playing and speak immediately."""
+        """Interrupt current audio and speak immediately."""
         with self._lock:
-            self._pending_text = "\x01" + text   # \x01 = interrupt marker
+            self._pending_text = "\x01" + text
             self._pending_pri  = PRIORITY_HIGH
             self._event.set()
 
     def shutdown(self):
         self._running = False
         self._event.set()
-        self._thread.join(timeout=4)
+        self._thread.join(timeout=3)
+        self._kill_espeak()
         if self._ps_proc:
             try:
                 self._ps_proc.stdin.close()
                 self._ps_proc.terminate()
             except Exception:
                 pass
-        self._kill_espeak()
 
-    # ── Worker thread ─────────────────────────────────────────────────────
+    # ── Worker ────────────────────────────────────────────────────────────
 
     def _worker(self):
         while self._running:
@@ -125,40 +121,44 @@ class SpeechEngine:
             interrupt = text.startswith("\x01")
             clean     = text[1:] if interrupt else text
 
-            log.info("Speaking%s: '%s'", " [INTERRUPT]" if interrupt else "", clean)
+            log.info("Speaking%s: '%s'",
+                     " [INTERRUPT]" if interrupt else "", clean)
 
             try:
                 if IS_WINDOWS and self._ps_proc:
                     prefix = "!" if interrupt else ""
-                    self._ps_proc.stdin.write((prefix + clean + "\n").encode("utf-8"))
+                    self._ps_proc.stdin.write(
+                        (prefix + clean + "\n").encode("utf-8")
+                    )
                     self._ps_proc.stdin.flush()
                 else:
-                    self._speak_espeak(clean, interrupt)
+                    self._speak_linux(clean, interrupt)
             except Exception as exc:
                 log.error("Speech error: %s", exc)
                 if IS_WINDOWS:
-                    self._restart_ps()
+                    self._ps_proc = self._start_ps()
 
-    def _speak_espeak(self, text: str, interrupt: bool):
+    def _speak_linux(self, text: str, interrupt: bool):
         """
-        Speak using espeak as a subprocess.
-        If interrupt=True, kill any currently-running espeak first.
-        espeak runs asynchronously so it doesn't block the worker thread —
-        the worker can pick up the next queued message immediately.
+        Kill any running espeak if interrupt, then launch new one.
+        espeak exits on its own when done — no blocking wait needed.
         """
         if interrupt:
             self._kill_espeak()
 
-        # espeak flags:
-        #   -s 150  = speed (words per minute) — tune to taste
-        #   -a 200  = amplitude (volume 0-200)
-        #   --stdout piped to /dev/null so it runs non-blocking
-        proc = subprocess.Popen(
-            ["espeak", "-s", "150", "-a", "200", text],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        # Only start a new one if nothing is playing (non-interrupt)
+        # or we just killed the old one (interrupt)
         with self._espeak_lock:
+            if not interrupt and self._espeak_proc is not None:
+                if self._espeak_proc.poll() is None:
+                    # Still speaking — don't overlap
+                    return
+
+            proc = subprocess.Popen(
+                ["espeak", "-s", "160", "-a", "200", "--", text],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
             self._espeak_proc = proc
 
     def _kill_espeak(self):
@@ -166,25 +166,16 @@ class SpeechEngine:
             if self._espeak_proc and self._espeak_proc.poll() is None:
                 try:
                     self._espeak_proc.terminate()
-                    self._espeak_proc.wait(timeout=0.5)
+                    self._espeak_proc.wait(timeout=0.3)
                 except Exception:
                     pass
             self._espeak_proc = None
 
-    def _restart_ps(self):
-        log.info("Restarting PowerShell speech process...")
-        try:
-            if self._ps_proc:
-                self._ps_proc.terminate()
-        except Exception:
-            pass
-        try:
-            self._ps_proc = subprocess.Popen(
-                ["powershell", "-NoProfile", "-WindowStyle", "Hidden",
-                 "-NonInteractive", "-Command", _PS_INIT],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception as e:
-            log.error("Failed to restart PS process: %s", e)
+    def _start_ps(self):
+        return subprocess.Popen(
+            ["powershell", "-NoProfile", "-WindowStyle", "Hidden",
+             "-NonInteractive", "-Command", _PS_INIT],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )

@@ -1,21 +1,16 @@
 # run.py  —  Single launcher for the full VisionGuide system
 #
-# Starts both the navigation loop and the web dashboard server
-# as separate threads in the same process, so they share memory
-# through shared_state.py.
-#
 # Usage:
-#   python run.py                  # default camera (index 0)
-#   python run.py --camera 1       # if USB camera is on /dev/video1
-#   python run.py --port 8080      # use different port (default 5000)
-#   python run.py --show           # also open local cv2 window
+#   python run.py                 # default settings
+#   python run.py --camera 1      # if USB camera is /dev/video1
+#   python run.py --port 8080     # different port
+#   python run.py --show          # also open local cv2 window
 
 import threading
 import logging
 import argparse
-import os
-import sys
 import time
+import socket
 
 for _noisy in ["comtypes", "comtypes.client", "comtypes.server",
                "PIL", "ultralytics", "torch", "urllib3",
@@ -30,9 +25,7 @@ logging.basicConfig(
 log = logging.getLogger("run")
 
 
-def get_local_ip() -> str:
-    """Return the Pi's WiFi IP address for display."""
-    import socket
+def get_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -43,8 +36,7 @@ def get_local_ip() -> str:
         return "unknown"
 
 
-def run_navigation(camera_index: int, show: bool):
-    """Runs the camera + YOLO + guidance pipeline."""
+def run_navigation(camera_index, show):
     import cv2
     from detector      import DetectorTracker
     from scene         import SceneAnalyzer
@@ -66,10 +58,10 @@ def run_navigation(camera_index: int, show: bool):
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     if not cap.isOpened():
-        log.error("Could not open camera %d", camera_index)
+        log.error("Cannot open camera %d — try --camera 1", camera_index)
         return
 
-    log.info("Navigation loop started (camera %d)", camera_index)
+    log.info("Camera %d ready — navigation loop started", camera_index)
 
     while True:
         ret, frame = cap.read()
@@ -102,49 +94,44 @@ def run_navigation(camera_index: int, show: bool):
     speech.shutdown()
     sensor.close()
     cap.release()
+    if show:
+        cv2.destroyAllWindows()
 
 
-def run_server(port: int):
-    """Runs the Flask dashboard server."""
+def run_server(port):
     from server import app
-    app.run(host="0.0.0.0", port=port, threaded=True, debug=False,
-            use_reloader=False)
+    app.run(host="0.0.0.0", port=port, threaded=True,
+            debug=False, use_reloader=False)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="VisionGuide — full system launcher")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--port",   type=int, default=5000)
-    parser.add_argument("--show",   action="store_true",
-                        help="Also open local cv2 window")
+    parser.add_argument("--show",   action="store_true")
     args = parser.parse_args()
 
-    ip = get_local_ip()
-    log.info("=" * 52)
-    log.info("  VisionGuide starting")
-    log.info("  Dashboard → http://%s:%d", ip, args.port)
-    log.info("  Camera index: %d", args.camera)
-    log.info("=" * 52)
+    ip = get_ip()
+    print()
+    print("  ╔══════════════════════════════════════════╗")
+    print(f"  ║  VisionGuide starting                    ║")
+    print(f"  ║  Open in browser:                        ║")
+    print(f"  ║  http://{ip}:{args.port}".ljust(45) + "║")
+    print("  ╚══════════════════════════════════════════╝")
+    print()
 
-    # Start Flask server in background thread
     server_thread = threading.Thread(
-        target=run_server,
-        args=(args.port,),
-        daemon=True,
-        name="server",
+        target=run_server, args=(args.port,),
+        daemon=True, name="flask"
     )
     server_thread.start()
-    log.info("Dashboard server started")
-    time.sleep(1.0)   # give Flask a moment to bind the port
+    time.sleep(1.5)   # let Flask bind before camera starts
+    log.info("Dashboard ready at http://%s:%d", ip, args.port)
 
-    # Run navigation loop in the main thread
-    # (keeps keyboard interrupt / signals working normally)
     try:
         run_navigation(args.camera, args.show)
     except KeyboardInterrupt:
-        log.info("Stopped by user.")
-    finally:
-        log.info("VisionGuide shut down.")
+        log.info("Stopped.")
 
 
 if __name__ == "__main__":
