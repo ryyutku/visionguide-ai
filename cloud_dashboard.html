@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
+  /* ... keep all existing styles from previous version ... */
   :root {
     --bg:      #080c10;
     --surface: #0d1117;
@@ -22,10 +23,7 @@
     --sans:    'Syne', sans-serif;
   }
   * { box-sizing: border-box; margin:0; padding:0; }
-  body {
-    background: var(--bg); color: var(--txt);
-    font-family: var(--sans); min-height:100vh;
-  }
+  body { background: var(--bg); color: var(--txt); font-family: var(--sans); min-height:100vh; }
 
   #setup {
     position:fixed; inset:0; background:var(--bg);
@@ -74,6 +72,17 @@
     background:rgba(0,212,255,.1); border:1px solid rgba(0,212,255,.3);
     color:var(--accent); font-family:var(--mono); font-size:9px;
     letter-spacing:.1em; padding:3px 9px; border-radius:3px;
+  }
+
+  .session-info {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--green);
+    margin-left: 12px;
+    padding: 3px 8px;
+    background: rgba(10,255,157,0.08);
+    border-radius: 3px;
+    border: 1px solid rgba(10,255,157,0.2);
   }
 
   .control-panel {
@@ -252,6 +261,7 @@
   </div>
   <div style="display:flex; align-items:center;">
     <span class="badge">☁ CLOUD DASHBOARD</span>
+    <span class="session-info" id="session-display">No active session</span>
     <div class="control-panel">
       <button class="btn" onclick="sendStatusCommand()">📡 STATUS</button>
       <button class="btn" id="nightmode-btn" onclick="toggleNightMode()">🌙 NIGHT</button>
@@ -269,17 +279,17 @@
 
 <div class="main">
   <div class="card wide">
-    <div class="card-title">Session Summary</div>
+    <div class="card-title">Current Session Summary</div>
     <div class="stats">
       <div class="stat"><div class="stat-label">Total Alerts</div><div class="stat-val" id="s-total">0</div></div>
-      <div class="stat"><div class="stat-label">Urgent</div><div class="stat-val" id="s-urgent" style="color:var(--urgent)">0</div></div>
-      <div class="stat"><div class="stat-label">Warnings</div><div class="stat-val" id="s-warn" style="color:var(--warning)">0</div></div>
+      <div class="stat"><div class="stat-label">Urgent (P3)</div><div class="stat-val" id="s-urgent" style="color:var(--urgent)">0</div></div>
+      <div class="stat"><div class="stat-label">Warnings (P2)</div><div class="stat-val" id="s-warn" style="color:var(--warning)">0</div></div>
       <div class="stat"><div class="stat-label">Last Object</div><div class="stat-val" id="s-obj" style="font-size:14px;padding-top:6px">—</div></div>
     </div>
   </div>
 
   <div class="card two">
-    <div class="card-title">Recent Alerts</div>
+    <div class="card-title">Recent Alerts (Current Session)</div>
     <div class="log-list" id="alert-log"></div>
     <div class="image-preview" id="image-preview"></div>
   </div>
@@ -301,9 +311,7 @@
   let lastAlertId = 0;
   let nightModeActive = false;
   let popupTimeout = null;
-  let totalAlertCount = 0;
-  let urgentCount = 0;
-  let warningCount = 0;
+  let currentSessionId = null;
   const ZONE_CLS = {clear:'zc',occupied:'zo',crowded:'zr'};
 
   window.onload = () => {
@@ -333,12 +341,27 @@
     localStorage.setItem('vg_url', url);
     localStorage.setItem('vg_key', key);
     document.getElementById('setup').style.display = 'none';
-    // Reset counters on new connection
-    totalAlertCount = 0;
-    urgentCount = 0;
-    warningCount = 0;
-    lastAlertId = 0;
+    
+    // Find current session
+    await findCurrentSession();
     poll();
+  }
+
+  async function findCurrentSession() {
+    try {
+      // Get the most recent session_id
+      const alerts = await supa('alerts', 'select=session_id&order=ts.desc&limit=1');
+      if (alerts.length > 0) {
+        currentSessionId = alerts[0].session_id;
+        document.getElementById('session-display').textContent = 
+          `📋 ${currentSessionId.substring(0, 20)}...`;
+        console.log('Current session:', currentSessionId);
+      } else {
+        document.getElementById('session-display').textContent = '⏳ Waiting for data...';
+      }
+    } catch(e) {
+      console.error('Failed to find session:', e);
+    }
   }
 
   async function supa(table, params = '') {
@@ -385,7 +408,10 @@
 
   function requestImage() {
     const id = getDeviceId();
-    if (id) { sendCommand(id, 'REQUEST_IMAGE', {}); alert('Image capture requested'); }
+    if (id) { 
+      sendCommand(id, 'REQUEST_IMAGE', {}); 
+      alert('Image capture requested. Check Pi terminal for status.');
+    }
   }
 
   function setVolume(val) {
@@ -404,7 +430,8 @@
   }
 
   function showImagePopup(imageUrl) {
-    // Remove existing popup
+    console.log('🎯 Showing popup for:', imageUrl);
+    
     const existing = document.querySelector('.image-popup');
     if (existing) existing.remove();
     if (popupTimeout) clearTimeout(popupTimeout);
@@ -417,7 +444,7 @@
         <span>📸 IMAGE CAPTURED</span>
         <button class="popup-close" onclick="this.parentElement.parentElement.remove(); if(popupTimeout) clearTimeout(popupTimeout);">×</button>
       </div>
-      <img class="popup-image" src="${imageUrl}" alt="Captured from Pi">
+      <img class="popup-image" src="${imageUrl}" alt="Captured from Pi" onerror="console.error('Failed to load image:', this.src)">
       <div class="popup-actions">
         <a class="popup-btn" href="${imageUrl}" download target="_blank">⬇ DOWNLOAD</a>
         <button class="popup-btn primary" onclick="window.open('${imageUrl}')">🔍 VIEW</button>
@@ -425,7 +452,6 @@
     `;
     container.appendChild(popup);
 
-    // Auto-hide after 5 seconds
     popupTimeout = setTimeout(() => {
       if (popup && popup.parentNode) {
         popup.classList.add('fadeout');
@@ -442,29 +468,24 @@
     e.className = `log-entry ${cls}`;
     let msgHtml = a.message;
 
-    // Check for image URL in message (multiple patterns)
-    const imagePatterns = [
-      /Image captured: (https?:\/\/[^\s]+)/,
-      /(https?:\/\/[^\s]+\.supabase\.co\/storage\/v1\/object\/[^\s]+\.jpg)/i,
-      /(https?:\/\/[^\s]+\.supabase\.co\/storage\/v1\/object\/[^\s]+\.jpeg)/i,
-      /(https?:\/\/[^\s]+\.supabase\.co\/storage\/v1\/object\/[^\s]+\.png)/i,
-    ];
-    
-    let imageUrl = null;
-    for (const pattern of imagePatterns) {
-      const match = a.message.match(pattern);
-      if (match) {
-        imageUrl = match[1] || match[0];
-        break;
-      }
-    }
+    console.log('📨 Processing alert:', a.message);
 
-    if (imageUrl) {
-      msgHtml = `📸 <a href="${imageUrl}" target="_blank">View captured image</a>`;
-      // Show popup
-      showImagePopup(imageUrl);
-      // Update persistent preview
-      document.getElementById('image-preview').innerHTML = `<img src="${imageUrl}" alt="Captured">`;
+    // Look for ANY URL in the message
+    const urlMatch = a.message.match(/(https?:\/\/[^\s]+)/g);
+    if (urlMatch) {
+      const imageUrl = urlMatch[0];
+      console.log('🖼️ Found URL in alert:', imageUrl);
+      
+      if (imageUrl.includes('supabase.co/storage') || 
+          imageUrl.includes('.jpg') || 
+          imageUrl.includes('.jpeg') || 
+          imageUrl.includes('.png') ||
+          a.message.toLowerCase().includes('image')) {
+        
+        msgHtml = `📸 <a href="${imageUrl}" target="_blank">View captured image</a>`;
+        showImagePopup(imageUrl);
+        document.getElementById('image-preview').innerHTML = `<img src="${imageUrl}" alt="Captured">`;
+      }
     }
 
     e.innerHTML = `<span class="ltime">${fmtTs(a.ts)}</span><span class="lmsg">${msgHtml}</span><span class="ltag ${tcls}">${a.closest_class||''}</span>`;
@@ -504,20 +525,25 @@
 
   async function poll() {
     try {
-      // Get ALL alerts for accurate counts (not just last 30)
-      const allAlerts = await supa('alerts', 'select=priority&order=ts.desc&limit=1000');
-      
-      // Update accurate counts
-      totalAlertCount = allAlerts.length;
-      urgentCount = allAlerts.filter(a => a.priority >= 3).length;
-      warningCount = allAlerts.filter(a => a.priority === 2).length;
-      
-      document.getElementById('s-total').textContent = totalAlertCount;
-      document.getElementById('s-urgent').textContent = urgentCount;
-      document.getElementById('s-warn').textContent = warningCount;
+      // Try to find current session if not set
+      if (!currentSessionId) {
+        await findCurrentSession();
+      }
 
-      // Get latest 30 for display
-      const alerts = await supa('alerts', 'select=*&order=ts.desc&limit=30');
+      let sessionFilter = '';
+      if (currentSessionId) {
+        sessionFilter = `&session_id=eq.${currentSessionId}`;
+      }
+
+      // Get alerts for CURRENT SESSION ONLY
+      const sessionAlerts = await supa('alerts', `select=priority&order=ts.desc&limit=1000${sessionFilter}`);
+      
+      document.getElementById('s-total').textContent = sessionAlerts.length;
+      document.getElementById('s-urgent').textContent = sessionAlerts.filter(a => a.priority >= 3).length;
+      document.getElementById('s-warn').textContent = sessionAlerts.filter(a => a.priority === 2).length;
+
+      // Get latest 30 for display (from current session)
+      const alerts = await supa('alerts', `select=*&order=ts.desc&limit=30${sessionFilter}`);
       
       if (alerts.length) {
         const latest = alerts[0];
@@ -525,6 +551,13 @@
         setZone('z-left',   latest.zone_left);
         setZone('z-center', latest.zone_center);
         setZone('z-right',  latest.zone_right);
+        
+        // Update current session ID if it changed
+        if (latest.session_id !== currentSessionId) {
+          currentSessionId = latest.session_id;
+          document.getElementById('session-display').textContent = 
+            `📋 ${currentSessionId.substring(0, 20)}...`;
+        }
       }
 
       // Add new alert rows
@@ -533,7 +566,7 @@
       if (newAlerts.length) lastAlertId = Math.max(...newAlerts.map(a=>a.id));
 
       // Sensor data
-      const sensors = await supa('sensor_readings', 'select=sensor_cm,ts&order=ts.desc&limit=60');
+      const sensors = await supa('sensor_readings', `select=sensor_cm,ts&order=ts.desc&limit=60${sessionFilter}`);
       sensorHistory = sensors.reverse();
       drawSensor();
 
