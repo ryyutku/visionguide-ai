@@ -11,6 +11,10 @@ import argparse
 import time
 import socket
 import queue
+import cv2
+import base64
+import requests
+import datetime
 
 for _noisy in ["comtypes", "comtypes.client", "comtypes.server",
                "PIL", "ultralytics", "torch", "urllib3",
@@ -37,15 +41,9 @@ def get_ip() -> str:
 
 
 def find_camera(preferred: int = None) -> int:
-    """
-    Returns the first working camera index.
-    If preferred is given, tries that first.
-    Searches indices 0-9.
-    """
     import cv2
     candidates = list(range(10))
     if preferred is not None:
-        # Try preferred first, then the rest
         candidates = [preferred] + [i for i in candidates if i != preferred]
 
     for i in candidates:
@@ -57,11 +55,10 @@ def find_camera(preferred: int = None) -> int:
                 log.info("Camera found at index %d", i)
                 return i
         cap.release()
+    return -1
 
-    return -1   # not found
 
-
-# ── Thread 1: Capture ─────────────────────────────────────────────────────────
+# ── Thread 1: Capture ─────────────────────────────────────────────────────
 
 def capture_loop(camera_index: int, frame_queue: queue.Queue,
                  stop: threading.Event):
@@ -85,11 +82,8 @@ def capture_loop(camera_index: int, frame_queue: queue.Queue,
             time.sleep(0.05)
             continue
 
-        # 🔄 FLIP THE FRAME 
-        frame = cv2.flip(frame, -1)  # -1 = both horizontal and vertical (180° rotation)
-        # Alternatives:
-        # frame = cv2.flip(frame, 0)   # 0 = vertical flip only
-        # frame = cv2.flip(frame, 1)   # 1 = horizontal flip only
+        # Flip frame 180° (camera mounted upside down)
+        frame = cv2.flip(frame, -1)
 
         if not frame_queue.empty():
             try:
@@ -102,7 +96,7 @@ def capture_loop(camera_index: int, frame_queue: queue.Queue,
     log.info("Capture stopped")
 
 
-# ── Thread 2: Inference ───────────────────────────────────────────────────────
+# ── Thread 2: Inference ───────────────────────────────────────────────────
 
 def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
     from detector      import DetectorTracker
@@ -122,27 +116,49 @@ def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
     fusion   = SensorFusion()
     cloud    = CloudLogger()
 
-    # ── Store last state for cloud command handlers ──────────────────────
+    # Store last state for command handlers
     last_state = {
         "scene_state": None,
         "detections": [],
         "fused": None,
+        "frame": None,
     }
 
-    # ── Register cloud command handlers ──────────────────────────────────
+    night_mode_enabled = False
+
+    # ── Helper: Upload image to Supabase Storage ────────────────────────
+    def upload_image_to_storage(image_bytes: bytes, filename: str) -> str:
+        if not cloud._enabled:
+            return None
+        try:
+            supa_url = cloud.SUPA_URL if hasattr(cloud, 'SUPA_URL') else None
+            supa_key = cloud.SUPA_KEY if hasattr(cloud, 'SUPA_KEY') else None
+            if not supa_url or not supa_key:
+                return None
+            url = f"{supa_url}/storage/v1/object/visionguide-images/{filename}"
+            headers = {
+                "apikey": supa_key,
+                "Authorization": f"Bearer {supa_key}",
+                "Content-Type": "image/jpeg",
+            }
+            r = requests.post(url, data=image_bytes, headers=headers, timeout=10)
+            if r.status_code in (200, 201):
+                return f"{supa_url}/storage/v1/object/public/visionguide-images/{filename}"
+            else:
+                log.error("Image upload failed: %d", r.status_code)
+                return None
+        except Exception as e:
+            log.error("Image upload error: %s", e)
+            return None
+
+    # ── Command Handlers ───────────────────────────────────────────────
     def handle_status(payload):
-        """Remote command: immediately log current status to cloud."""
         log.info("Cloud command: STATUS received")
-        # Use the most recent state captured
         scene_state = last_state["scene_state"]
         detections  = last_state["detections"]
         fused       = last_state["fused"]
-
         if scene_state is None:
-            log.warning("STATUS command: no state available yet")
             return
-
-        # Log an alert with "manual status" message
         cloud.log_alert(
             message           = "Manual status request (remote)",
             priority          = 1,
@@ -151,8 +167,6 @@ def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
             closest_region    = scene_state.closest_region,
             closest_proximity = scene_state.closest_proximity,
         )
-
-        # Also log a sensor reading
         cloud.log_sensor(
             sensor_cm       = fused.sensor_cm if fused else None,
             sensor_band     = fused.proximity if fused else "none",
@@ -160,19 +174,74 @@ def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
             confirmed_count = sum(1 for d in detections if d["confirmed"]),
         )
 
-        log.info("STATUS command: data sent to cloud")
-
     def handle_set_volume(payload):
-        """Remote command: change speech volume (future enhancement)."""
         vol = payload.get("volume", 80)
-        log.info("Cloud command: SET_VOLUME to %d%%", vol)
-        # Could extend speech.py to support volume changes
-        # speech.set_volume(vol)
+        try:
+            vol = int(vol)
+        except:
+            vol = 80
+        speech.set_volume(vol)
+        log.info("Volume set to %d", vol)
+        if last_state["scene_state"]:
+            cloud.log_alert(
+                message=f"Volume set to {vol}%",
+                priority=1,
+                zone_states=last_state["scene_state"].zones,
+                closest_class="",
+                closest_region="",
+                closest_proximity="none"
+            )
 
+    def handle_night_mode(payload):
+        nonlocal night_mode_enabled
+        enable = payload.get("enable", True)
+        if isinstance(enable, str):
+            enable = enable.lower() in ("true", "1", "yes")
+        night_mode_enabled = enable
+        status = "enabled" if enable else "disabled"
+        log.info("Night mode %s", status)
+        if last_state["scene_state"]:
+            cloud.log_alert(
+                message=f"Night mode {status}",
+                priority=1,
+                zone_states=last_state["scene_state"].zones,
+                closest_class="",
+                closest_region="",
+                closest_proximity="none"
+            )
+
+    def handle_request_image(payload):
+        log.info("Cloud command: REQUEST_IMAGE received")
+        frame = last_state.get("frame")
+        if frame is None:
+            log.warning("No frame available")
+            return
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        image_bytes = buf.tobytes()
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"capture_{timestamp}.jpg"
+        public_url = upload_image_to_storage(image_bytes, filename)
+        if public_url:
+            log.info("Image uploaded: %s", public_url)
+            if last_state["scene_state"]:
+                cloud.log_alert(
+                    message=f"Image captured: {public_url}",
+                    priority=1,
+                    zone_states=last_state["scene_state"].zones,
+                    closest_class="",
+                    closest_region="",
+                    closest_proximity="none"
+                )
+        else:
+            log.error("Image upload failed")
+
+    # Register handlers
     cloud.register_command_handler("STATUS", handle_status)
     cloud.register_command_handler("SET_VOLUME", handle_set_volume)
+    cloud.register_command_handler("NIGHT_MODE", handle_night_mode)
+    cloud.register_command_handler("REQUEST_IMAGE", handle_request_image)
 
-    log.info("Inference ready (cloud commands enabled)")
+    log.info("Inference ready (commands: STATUS, SET_VOLUME, NIGHT_MODE, REQUEST_IMAGE)")
 
     frames_done = 0
     fps_clock   = time.time()
@@ -184,6 +253,10 @@ def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
         except queue.Empty:
             continue
 
+        # Apply night mode if enabled
+        if night_mode_enabled:
+            frame = cv2.convertScaleAbs(frame, alpha=1.5, beta=30)
+
         processed, detections = detector.get_detections(frame)
         scene_state           = scene.analyze(detections, frame.shape[1])
         dist_cm               = sensor.read_distance_cm()
@@ -192,10 +265,11 @@ def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
             scene_state, detections, speech, fused
         )
 
-        # Store for command handlers
+        # Store state
         last_state["scene_state"] = scene_state
         last_state["detections"]  = detections
         last_state["fused"]       = fused
+        last_state["frame"]       = processed
 
         if message:
             log.info("[ALERT p%d] %s", priority, message)
@@ -238,7 +312,7 @@ def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
     log.info("Inference stopped")
 
 
-# ── Thread 3: Flask ───────────────────────────────────────────────────────────
+# ── Thread 3: Flask ───────────────────────────────────────────────────────
 
 def server_loop(port: int):
     from server import app
@@ -246,23 +320,18 @@ def server_loop(port: int):
             debug=False, use_reloader=False)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--camera", type=int, default=None,
-                        help="Camera index (auto-detected if not specified)")
+    parser.add_argument("--camera", type=int, default=None)
     parser.add_argument("--port",   type=int, default=5000)
     args = parser.parse_args()
 
-    # Find camera before starting anything else
     log.info("Scanning for camera...")
     cam_index = find_camera(args.camera)
     if cam_index == -1:
         log.error("No working camera found.")
-        log.error("Check that your USB camera is plugged in, then run:")
-        log.error("  ls /dev/video*")
-        log.error("  python run.py --camera <index>")
         return
 
     ip = get_ip()

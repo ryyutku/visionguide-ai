@@ -6,11 +6,11 @@
 # Both support say_urgent() which kills current audio and speaks immediately.
 # Install espeak on Pi:  sudo apt install espeak
 
+
 import threading
 import subprocess
 import sys
 import logging
-import queue
 
 log = logging.getLogger("speech")
 
@@ -47,23 +47,18 @@ class SpeechEngine:
         self._event        = threading.Event()
         self._running      = True
         self._ps_proc      = None
+        self._volume       = 100  # default volume (espeak -a parameter, range 0-200)
 
         if IS_WINDOWS:
             self._ps_proc = self._start_ps()
             log.info("Speech engine ready (PowerShell)")
         else:
-            # Check espeak exists
-            r = subprocess.run(["which", "espeak"],
-                               capture_output=True)
+            r = subprocess.run(["which", "espeak"], capture_output=True)
             if r.returncode != 0:
                 log.warning("espeak not found — run: sudo apt install espeak")
             else:
                 log.info("Speech engine ready (espeak)")
 
-        # Single persistent espeak process on Linux
-        # We use a simple approach: kill + restart for interrupts,
-        # but keep the process alive between sequential utterances
-        # by writing to a queue that feeds one long-lived worker.
         self._espeak_proc = None
         self._espeak_lock = threading.Lock()
 
@@ -72,10 +67,12 @@ class SpeechEngine:
         )
         self._thread.start()
 
-    # ── Public ────────────────────────────────────────────────────────────
+    def set_volume(self, volume: int):
+        """Set speech volume (0-200)."""
+        self._volume = max(0, min(200, volume))
+        log.info("Volume set to %d", self._volume)
 
     def say(self, text: str, priority: int = PRIORITY_LOW):
-        """Queue a message — replaces any pending lower-priority message."""
         with self._lock:
             if self._pending_text is None or priority >= self._pending_pri:
                 self._pending_text = text
@@ -83,7 +80,6 @@ class SpeechEngine:
                 self._event.set()
 
     def say_urgent(self, text: str):
-        """Interrupt current audio and speak immediately."""
         with self._lock:
             self._pending_text = "\x01" + text
             self._pending_pri  = PRIORITY_HIGH
@@ -101,8 +97,6 @@ class SpeechEngine:
             except Exception:
                 pass
 
-    # ── Worker ────────────────────────────────────────────────────────────
-
     def _worker(self):
         while self._running:
             self._event.wait()
@@ -111,7 +105,7 @@ class SpeechEngine:
                 break
 
             with self._lock:
-                text               = self._pending_text
+                text = self._pending_text
                 self._pending_text = None
                 self._pending_pri  = 0
 
@@ -121,15 +115,12 @@ class SpeechEngine:
             interrupt = text.startswith("\x01")
             clean     = text[1:] if interrupt else text
 
-            log.info("Speaking%s: '%s'",
-                     " [INTERRUPT]" if interrupt else "", clean)
+            log.info("Speaking%s: '%s'", " [INTERRUPT]" if interrupt else "", clean)
 
             try:
                 if IS_WINDOWS and self._ps_proc:
                     prefix = "!" if interrupt else ""
-                    self._ps_proc.stdin.write(
-                        (prefix + clean + "\n").encode("utf-8")
-                    )
+                    self._ps_proc.stdin.write((prefix + clean + "\n").encode("utf-8"))
                     self._ps_proc.stdin.flush()
                 else:
                     self._speak_linux(clean, interrupt)
@@ -139,23 +130,17 @@ class SpeechEngine:
                     self._ps_proc = self._start_ps()
 
     def _speak_linux(self, text: str, interrupt: bool):
-        """
-        Kill any running espeak if interrupt, then launch new one.
-        espeak exits on its own when done — no blocking wait needed.
-        """
         if interrupt:
             self._kill_espeak()
 
-        # Only start a new one if nothing is playing (non-interrupt)
-        # or we just killed the old one (interrupt)
         with self._espeak_lock:
             if not interrupt and self._espeak_proc is not None:
                 if self._espeak_proc.poll() is None:
-                    # Still speaking — don't overlap
                     return
 
+            # Use current volume setting
             proc = subprocess.Popen(
-                ["espeak", "-s", "160", "-a", "200", "--", text],
+                ["espeak", "-s", "160", "-a", str(self._volume), "--", text],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
