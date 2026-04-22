@@ -27,7 +27,6 @@
     font-family: var(--sans); min-height:100vh;
   }
 
-  /* Setup overlay */
   #setup {
     position:fixed; inset:0; background:var(--bg);
     display:flex; align-items:center; justify-content:center;
@@ -37,10 +36,8 @@
     background: var(--surface); border:1px solid var(--border);
     border-radius:8px; padding:36px; width:440px;
   }
-  .setup-card h2 {
-    font-size:20px; font-weight:800; margin-bottom:6px; color:#fff;
-  }
-  .setup-card p { font-size:12px; color:var(--muted); margin-bottom:24px; line-height:1.6; }
+  .setup-card h2 { font-size:20px; font-weight:800; margin-bottom:6px; color:#fff; }
+  .setup-card p { font-size:12px; color:var(--muted); margin-bottom:24px; }
   .setup-card label { font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); display:block; margin-bottom:5px; }
   .setup-card input {
     width:100%; background:var(--s2); border:1px solid var(--border);
@@ -51,12 +48,11 @@
   .setup-card button {
     width:100%; background:var(--accent); color:#000; border:none;
     font-family:var(--sans); font-size:13px; font-weight:700;
-    padding:11px; border-radius:4px; cursor:pointer; letter-spacing:.05em;
+    padding:11px; border-radius:4px; cursor:pointer;
   }
   .setup-card button:hover { opacity:.85; }
-  #setup-err { color:var(--urgent); font-size:11px; margin-top:10px; font-family:var(--mono); min-height:16px; }
+  #setup-err { color:var(--urgent); font-size:11px; margin-top:10px; }
 
-  /* Header */
   header {
     display:flex; align-items:center; justify-content:space-between;
     padding:12px 24px; background:var(--surface);
@@ -80,7 +76,6 @@
     letter-spacing:.1em; padding:3px 9px; border-radius:3px;
   }
 
-  /* Control Panel */
   .control-panel {
     display:flex; align-items:center; gap:12px; margin-left:12px;
   }
@@ -100,16 +95,10 @@
   .slider-container input { width:70px; }
   #volume-value { color:var(--accent); font-size:9px; min-width:35px; }
 
-  /* Main grid */
   .main { max-width:1200px; margin:0 auto; padding:20px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
-
-  .card {
-    background:var(--surface); border:1px solid var(--border);
-    border-radius:6px; padding:18px;
-  }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:18px; }
   .card.wide { grid-column: span 3; }
   .card.two  { grid-column: span 2; }
-
   .card-title {
     font-size:8px; font-weight:600; letter-spacing:.16em;
     text-transform:uppercase; color:var(--muted); margin-bottom:14px;
@@ -117,15 +106,12 @@
   }
   .card-title::after { content:''; flex:1; height:1px; background:var(--border); }
 
-  /* Stats row */
   .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
   .stat { background:var(--s2); border:1px solid var(--border); border-radius:4px; padding:12px; }
   .stat-label { font-size:8px; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
   .stat-val   { font-family:var(--mono); font-size:28px; font-weight:700; color:#fff; line-height:1; }
 
-  /* Alert log */
-  .log-list { display:flex; flex-direction:column; gap:4px; max-height:320px; overflow-y:auto;
-    scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+  .log-list { display:flex; flex-direction:column; gap:4px; max-height:320px; overflow-y:auto; }
   .log-entry {
     display:flex; gap:10px; align-items:flex-start;
     padding:7px 10px; border-radius:3px; background:var(--s2);
@@ -134,21 +120,18 @@
   .lp3 { border-left-color:var(--urgent);  background:rgba(255,77,77,.06); }
   .lp2 { border-left-color:var(--warning); background:rgba(255,170,0,.05); }
   .lp1 { border-left-color:var(--accent);  background:rgba(0,212,255,.04); }
-  .ltime { font-family:var(--mono); font-size:9px; color:var(--muted); white-space:nowrap; padding-top:1px; }
+  .ltime { font-family:var(--mono); font-size:9px; color:var(--muted); white-space:nowrap; }
   .lmsg  { font-family:var(--mono); font-size:11px; }
-  .ltag  { font-family:var(--mono); font-size:9px; padding:1px 6px; border-radius:2px; white-space:nowrap; }
+  .ltag  { font-family:var(--mono); font-size:9px; padding:1px 6px; border-radius:2px; }
   .tp3 { background:rgba(255,77,77,.2); color:#ff6b6b; }
   .tp2 { background:rgba(255,170,0,.2); color:var(--warning); }
   .tp1 { background:rgba(0,212,255,.2); color:var(--accent); }
 
-  /* Image preview in sidebar */
   .image-preview { margin-top:10px; text-align:center; }
   .image-preview img { max-width:100%; max-height:150px; border-radius:4px; border:1px solid var(--border); }
 
-  /* Sensor chart */
   #sensor-canvas { width:100%; height:120px; display:block; }
 
-  /* Zone pills */
   .zone-row { display:flex; gap:8px; margin-bottom:8px; }
   .zpill {
     flex:1; text-align:center; padding:8px 4px; border-radius:4px;
@@ -162,17 +145,17 @@
 
   #last-update { font-family:var(--mono); font-size:10px; color:var(--muted); text-align:right; padding:4px 24px 12px; }
 
-  /* Popup styles */
+  /* Popup */
   .image-popup {
     position: fixed;
     bottom: 24px;
     right: 24px;
     background: var(--surface);
-    border: 1px solid var(--accent);
+    border: 2px solid var(--accent);
     border-radius: 8px;
     padding: 16px;
-    max-width: 320px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    max-width: 350px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
     z-index: 1000;
     animation: slideIn 0.3s ease;
   }
@@ -181,7 +164,7 @@
     to { opacity: 1; transform: translateX(0); }
   }
   .image-popup.fadeout {
-    animation: fadeOut 0.5s ease forwards;
+    animation: fadeOut 0.3s ease forwards;
   }
   @keyframes fadeOut {
     to { opacity: 0; transform: translateX(20px); }
@@ -194,8 +177,9 @@
   }
   .popup-header span {
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--accent);
+    font-weight: 700;
     letter-spacing: .1em;
   }
   .popup-close {
@@ -203,9 +187,9 @@
     border: none;
     color: var(--muted);
     cursor: pointer;
-    font-size: 18px;
+    font-size: 20px;
   }
-  .popup-close:hover { color: var(--txt); }
+  .popup-close:hover { color: var(--urgent); }
   .popup-image {
     width: 100%;
     border-radius: 4px;
@@ -222,16 +206,15 @@
     border: 1px solid var(--border);
     color: var(--txt);
     font-family: var(--mono);
-    font-size: 9px;
-    padding: 6px;
-    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 8px;
+    border-radius: 4px;
     cursor: pointer;
     text-align: center;
     text-decoration: none;
   }
-  .popup-btn:hover {
-    background: var(--border);
-  }
+  .popup-btn:hover { background: var(--border); }
   .popup-btn.primary {
     background: var(--accent);
     color: #000;
@@ -247,12 +230,10 @@
 </head>
 <body>
 
-<!-- Setup overlay -->
 <div id="setup">
   <div class="setup-card">
     <h2>VisionGuide Cloud Dashboard</h2>
-    <p>Enter your Supabase project credentials to connect.<br>
-       Find these in your Supabase project → Settings → API.</p>
+    <p>Enter your Supabase project credentials to connect.</p>
     <label>Supabase Project URL</label>
     <input id="inp-url" type="text" placeholder="https://xxxx.supabase.co">
     <label>Anon / Public Key</label>
@@ -262,7 +243,6 @@
   </div>
 </div>
 
-<!-- Popup container -->
 <div id="popup-container"></div>
 
 <header>
@@ -288,13 +268,12 @@
 <div id="last-update">connecting...</div>
 
 <div class="main">
-
   <div class="card wide">
     <div class="card-title">Session Summary</div>
     <div class="stats">
-      <div class="stat"><div class="stat-label">Total Alerts</div><div class="stat-val" id="s-total">—</div></div>
-      <div class="stat"><div class="stat-label">Urgent</div><div class="stat-val" id="s-urgent" style="color:var(--urgent)">—</div></div>
-      <div class="stat"><div class="stat-label">Warnings</div><div class="stat-val" id="s-warn" style="color:var(--warning)">—</div></div>
+      <div class="stat"><div class="stat-label">Total Alerts</div><div class="stat-val" id="s-total">0</div></div>
+      <div class="stat"><div class="stat-label">Urgent</div><div class="stat-val" id="s-urgent" style="color:var(--urgent)">0</div></div>
+      <div class="stat"><div class="stat-label">Warnings</div><div class="stat-val" id="s-warn" style="color:var(--warning)">0</div></div>
       <div class="stat"><div class="stat-label">Last Object</div><div class="stat-val" id="s-obj" style="font-size:14px;padding-top:6px">—</div></div>
     </div>
   </div>
@@ -312,21 +291,21 @@
       <div class="zpill zc" id="z-center">center<br>—</div>
       <div class="zpill zc" id="z-right">right<br>—</div>
     </div>
-    <div class="card-title" style="margin-top:14px">Sensor Distance (recent)</div>
+    <div class="card-title" style="margin-top:14px">Sensor Distance</div>
     <canvas id="sensor-canvas"></canvas>
   </div>
-
 </div>
 
 <script>
   let SUPA_URL = '', SUPA_KEY = '';
   let lastAlertId = 0;
   let nightModeActive = false;
-  let lastImageUrl = '';
   let popupTimeout = null;
+  let totalAlertCount = 0;
+  let urgentCount = 0;
+  let warningCount = 0;
   const ZONE_CLS = {clear:'zc',occupied:'zo',crowded:'zr'};
 
-  // Try to restore credentials from localStorage
   window.onload = () => {
     const u = localStorage.getItem('vg_url');
     const k = localStorage.getItem('vg_key');
@@ -340,33 +319,31 @@
     const url = document.getElementById('inp-url').value.trim().replace(/\/+$/, '');
     const key = document.getElementById('inp-key').value.trim();
     const err = document.getElementById('setup-err');
-
     if (!url || !key) { err.textContent = 'Both fields required.'; return; }
-
     try {
       const r = await fetch(`${url}/rest/v1/alerts?select=id&limit=1`, {
         headers: { apikey: key, Authorization: `Bearer ${key}` }
       });
-      if (!r.ok) { err.textContent = `Connection failed: ${r.status} — check URL and key.`; return; }
+      if (!r.ok) { err.textContent = `Connection failed: ${r.status}`; return; }
     } catch(e) {
-      err.textContent = 'Network error — check URL.';
+      err.textContent = 'Network error.';
       return;
     }
-
     SUPA_URL = url; SUPA_KEY = key;
     localStorage.setItem('vg_url', url);
     localStorage.setItem('vg_key', key);
     document.getElementById('setup').style.display = 'none';
+    // Reset counters on new connection
+    totalAlertCount = 0;
+    urgentCount = 0;
+    warningCount = 0;
+    lastAlertId = 0;
     poll();
   }
 
   async function supa(table, params = '') {
     const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${params}`, {
-      headers: {
-        apikey: SUPA_KEY,
-        Authorization: `Bearer ${SUPA_KEY}`,
-        'Accept-Profile': 'public',
-      }
+      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
     });
     if (!r.ok) throw new Error(r.status);
     return r.json();
@@ -374,26 +351,17 @@
 
   async function sendCommand(deviceId, command, payload = {}) {
     if (!SUPA_URL || !SUPA_KEY) return;
-    const body = {
-      device_id: deviceId,
-      command: command,
-      payload: payload,
-      executed: false
-    };
-    try {
-      await fetch(`${SUPA_URL}/rest/v1/commands`, {
-        method: 'POST',
-        headers: {
-          'apikey': SUPA_KEY,
-          'Authorization': `Bearer ${SUPA_KEY}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
-        },
-        body: JSON.stringify(body)
-      });
-    } catch(e) {
-      console.error('Command failed:', e);
-    }
+    const body = { device_id: deviceId, command, payload, executed: false };
+    await fetch(`${SUPA_URL}/rest/v1/commands`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPA_KEY,
+        'Authorization': `Bearer ${SUPA_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify(body)
+    });
   }
 
   function getDeviceId() {
@@ -402,10 +370,7 @@
 
   function sendStatusCommand() {
     const id = getDeviceId();
-    if (id) {
-      sendCommand(id, 'STATUS', {});
-      alert('STATUS command sent to ' + id);
-    }
+    if (id) { sendCommand(id, 'STATUS', {}); alert('Status request sent'); }
   }
 
   function toggleNightMode() {
@@ -420,23 +385,16 @@
 
   function requestImage() {
     const id = getDeviceId();
-    if (id) {
-      sendCommand(id, 'REQUEST_IMAGE', {});
-      alert('Image capture requested from ' + id);
-    }
+    if (id) { sendCommand(id, 'REQUEST_IMAGE', {}); alert('Image capture requested'); }
   }
 
   function setVolume(val) {
     document.getElementById('volume-value').textContent = val;
     const id = getDeviceId();
-    if (id) {
-      sendCommand(id, 'SET_VOLUME', { volume: parseInt(val) });
-    }
+    if (id) { sendCommand(id, 'SET_VOLUME', { volume: parseInt(val) }); }
   }
 
-  function fmtTs(ts) {
-    return new Date(ts).toLocaleTimeString('en-GB', { hour12:false });
-  }
+  function fmtTs(ts) { return new Date(ts).toLocaleTimeString('en-GB', { hour12:false }); }
 
   function setZone(id, status) {
     const el = document.getElementById(id);
@@ -445,7 +403,7 @@
     el.innerHTML = `${name}<br>${status||'—'}`;
   }
 
-  function showImagePopup(imageUrl, autoHideMs = 10000) {
+  function showImagePopup(imageUrl) {
     // Remove existing popup
     const existing = document.querySelector('.image-popup');
     if (existing) existing.remove();
@@ -456,10 +414,10 @@
     popup.className = 'image-popup';
     popup.innerHTML = `
       <div class="popup-header">
-        <span>📸 NEW CAPTURE</span>
+        <span>📸 IMAGE CAPTURED</span>
         <button class="popup-close" onclick="this.parentElement.parentElement.remove(); if(popupTimeout) clearTimeout(popupTimeout);">×</button>
       </div>
-      <img class="popup-image" src="${imageUrl}" alt="Captured">
+      <img class="popup-image" src="${imageUrl}" alt="Captured from Pi">
       <div class="popup-actions">
         <a class="popup-btn" href="${imageUrl}" download target="_blank">⬇ DOWNLOAD</a>
         <button class="popup-btn primary" onclick="window.open('${imageUrl}')">🔍 VIEW</button>
@@ -467,13 +425,13 @@
     `;
     container.appendChild(popup);
 
-    // Auto-hide after specified time
+    // Auto-hide after 5 seconds
     popupTimeout = setTimeout(() => {
       if (popup && popup.parentNode) {
         popup.classList.add('fadeout');
-        setTimeout(() => popup.remove(), 500);
+        setTimeout(() => popup.remove(), 300);
       }
-    }, autoHideMs);
+    }, 5000);
   }
 
   function addAlertRow(a) {
@@ -484,118 +442,106 @@
     e.className = `log-entry ${cls}`;
     let msgHtml = a.message;
 
-    if (a.message && a.message.startsWith('Image captured: http')) {
-      const url = a.message.replace('Image captured: ', '');
-      lastImageUrl = url;
-      msgHtml = `📸 <a href="${url}" target="_blank">View Image</a>`;
-      // Show popup for 10 seconds
-      showImagePopup(url, 10000);
-      // Update persistent preview
-      document.getElementById('image-preview').innerHTML = `<img src="${url}" alt="Captured">`;
+    // Check for image URL in message (multiple patterns)
+    const imagePatterns = [
+      /Image captured: (https?:\/\/[^\s]+)/,
+      /(https?:\/\/[^\s]+\.supabase\.co\/storage\/v1\/object\/[^\s]+\.jpg)/i,
+      /(https?:\/\/[^\s]+\.supabase\.co\/storage\/v1\/object\/[^\s]+\.jpeg)/i,
+      /(https?:\/\/[^\s]+\.supabase\.co\/storage\/v1\/object\/[^\s]+\.png)/i,
+    ];
+    
+    let imageUrl = null;
+    for (const pattern of imagePatterns) {
+      const match = a.message.match(pattern);
+      if (match) {
+        imageUrl = match[1] || match[0];
+        break;
+      }
     }
 
-    e.innerHTML = `
-      <span class="ltime">${fmtTs(a.ts)}</span>
-      <span class="lmsg">${msgHtml}</span>
-      <span class="ltag ${tcls}">${a.closest_class||''}</span>
-    `;
+    if (imageUrl) {
+      msgHtml = `📸 <a href="${imageUrl}" target="_blank">View captured image</a>`;
+      // Show popup
+      showImagePopup(imageUrl);
+      // Update persistent preview
+      document.getElementById('image-preview').innerHTML = `<img src="${imageUrl}" alt="Captured">`;
+    }
+
+    e.innerHTML = `<span class="ltime">${fmtTs(a.ts)}</span><span class="lmsg">${msgHtml}</span><span class="ltag ${tcls}">${a.closest_class||''}</span>`;
     list.insertBefore(e, list.firstChild);
     while (list.children.length > 60) list.removeChild(list.lastChild);
   }
 
-  // Canvas chart for sensor distance
   const canvas = document.getElementById('sensor-canvas');
-  const ctx    = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d');
   let sensorHistory = [];
 
   function drawSensor() {
     const W = canvas.offsetWidth, H = 120;
     canvas.width = W; canvas.height = H;
-    ctx.clearRect(0, 0, W, H);
-
+    ctx.clearRect(0,0,W,H);
     if (sensorHistory.length < 2) return;
-
-    const vals = sensorHistory.map(r => r.sensor_cm).filter(v => v != null);
+    const vals = sensorHistory.map(r=>r.sensor_cm).filter(v=>v!=null);
     if (!vals.length) return;
-
     const max = Math.max(...vals, 200);
-    const pts = sensorHistory
-      .filter(r => r.sensor_cm != null)
-      .map((r, i, arr) => ({
-        x: (i / (arr.length - 1)) * W,
-        y: H - (r.sensor_cm / max) * (H - 10) - 5,
-      }));
-
-    // Fill
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, H);
-    pts.forEach(p => ctx.lineTo(p.x, p.y));
-    ctx.lineTo(pts[pts.length-1].x, H);
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(0,212,255,0.08)';
-    ctx.fill();
-
-    // Line
-    ctx.beginPath();
-    pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-    ctx.strokeStyle = 'rgba(0,212,255,0.8)';
-    ctx.lineWidth   = 1.5;
-    ctx.stroke();
-
-    // 45cm threshold line
-    const ty = H - (45 / max) * (H - 10) - 5;
-    ctx.beginPath();
-    ctx.setLineDash([4,4]);
-    ctx.moveTo(0, ty); ctx.lineTo(W, ty);
-    ctx.strokeStyle = 'rgba(255,77,77,0.5)';
-    ctx.lineWidth   = 1;
-    ctx.stroke();
+    const pts = sensorHistory.filter(r=>r.sensor_cm!=null).map((r,i,arr)=>({
+      x: (i/(arr.length-1))*W,
+      y: H - (r.sensor_cm/max)*(H-10)-5
+    }));
+    ctx.beginPath(); ctx.moveTo(pts[0].x, H);
+    pts.forEach(p=>ctx.lineTo(p.x,p.y));
+    ctx.lineTo(pts[pts.length-1].x, H); ctx.closePath();
+    ctx.fillStyle = 'rgba(0,212,255,0.08)'; ctx.fill();
+    ctx.beginPath(); pts.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));
+    ctx.strokeStyle = 'rgba(0,212,255,0.8)'; ctx.lineWidth = 1.5; ctx.stroke();
+    const ty = H - (45/max)*(H-10)-5;
+    ctx.beginPath(); ctx.setLineDash([4,4]);
+    ctx.moveTo(0,ty); ctx.lineTo(W,ty);
+    ctx.strokeStyle = 'rgba(255,77,77,0.5)'; ctx.lineWidth = 1; ctx.stroke();
     ctx.setLineDash([]);
-
-    ctx.fillStyle = 'rgba(255,77,77,0.7)';
-    ctx.font = '9px Space Mono, monospace';
-    ctx.fillText('STOP (45cm)', 4, ty - 3);
+    ctx.fillStyle = 'rgba(255,77,77,0.7)'; ctx.font = '9px Space Mono'; ctx.fillText('STOP (45cm)',4,ty-3);
   }
 
   async function poll() {
     try {
-      // Fetch latest 30 alerts
-      const alerts = await supa('alerts',
-        'select=*&order=ts.desc&limit=30'
-      );
+      // Get ALL alerts for accurate counts (not just last 30)
+      const allAlerts = await supa('alerts', 'select=priority&order=ts.desc&limit=1000');
+      
+      // Update accurate counts
+      totalAlertCount = allAlerts.length;
+      urgentCount = allAlerts.filter(a => a.priority >= 3).length;
+      warningCount = allAlerts.filter(a => a.priority === 2).length;
+      
+      document.getElementById('s-total').textContent = totalAlertCount;
+      document.getElementById('s-urgent').textContent = urgentCount;
+      document.getElementById('s-warn').textContent = warningCount;
 
-      document.getElementById('s-total').textContent  = alerts.length;
-      document.getElementById('s-urgent').textContent = alerts.filter(a=>a.priority>=3).length;
-      document.getElementById('s-warn').textContent   = alerts.filter(a=>a.priority===2).length;
-
+      // Get latest 30 for display
+      const alerts = await supa('alerts', 'select=*&order=ts.desc&limit=30');
+      
       if (alerts.length) {
         const latest = alerts[0];
-        document.getElementById('s-obj').textContent =
-          latest.closest_class || '—';
+        document.getElementById('s-obj').textContent = latest.closest_class || '—';
         setZone('z-left',   latest.zone_left);
         setZone('z-center', latest.zone_center);
         setZone('z-right',  latest.zone_right);
       }
 
-      // Add new alert rows (avoid duplicates)
+      // Add new alert rows
       const newAlerts = alerts.filter(a => a.id > lastAlertId);
       newAlerts.reverse().forEach(a => addAlertRow(a));
       if (newAlerts.length) lastAlertId = Math.max(...newAlerts.map(a=>a.id));
 
-      // Fetch latest sensor readings for chart
-      const sensors = await supa('sensor_readings',
-        'select=sensor_cm,ts&order=ts.desc&limit=60'
-      );
+      // Sensor data
+      const sensors = await supa('sensor_readings', 'select=sensor_cm,ts&order=ts.desc&limit=60');
       sensorHistory = sensors.reverse();
       drawSensor();
 
-      document.getElementById('last-update').textContent =
-        'Last updated: ' + new Date().toLocaleTimeString('en-GB',{hour12:false});
-
+      document.getElementById('last-update').textContent = 'Last updated: ' + new Date().toLocaleTimeString('en-GB',{hour12:false});
     } catch(e) {
+      console.error('Poll error:', e);
       document.getElementById('last-update').textContent = 'Connection error — retrying...';
     }
-
     setTimeout(poll, 2000);
   }
 </script>
