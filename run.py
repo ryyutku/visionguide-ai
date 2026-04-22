@@ -84,7 +84,13 @@ def capture_loop(camera_index: int, frame_queue: queue.Queue,
         if not ret:
             time.sleep(0.05)
             continue
-        # Always keep only the latest frame
+
+        # 🔄 FLIP THE FRAME 
+        frame = cv2.flip(frame, -1)  # -1 = both horizontal and vertical (180° rotation)
+        # Alternatives:
+        # frame = cv2.flip(frame, 0)   # 0 = vertical flip only
+        # frame = cv2.flip(frame, 1)   # 1 = horizontal flip only
+
         if not frame_queue.empty():
             try:
                 frame_queue.get_nowait()
