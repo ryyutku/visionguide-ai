@@ -138,6 +138,15 @@
 
   #last-update { font-family:var(--mono); font-size:10px; color:var(--muted); text-align:right; padding:4px 24px 12px; }
 
+  /* Command button */
+  #cmd-status {
+    background: var(--accent); color: #000; border: none;
+    font-family: var(--mono); font-size: 9px; font-weight: 700;
+    padding: 4px 10px; border-radius: 3px; cursor: pointer;
+    letter-spacing: .08em; margin-left: 12px;
+  }
+  #cmd-status:hover { opacity: 0.8; }
+
   ::-webkit-scrollbar { width:3px; }
   ::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
 </style>
@@ -164,7 +173,10 @@
     <div class="dot"></div>
     <h1>Vision<span>Guide</span></h1>
   </div>
-  <span class="badge">☁ CLOUD DASHBOARD</span>
+  <div style="display:flex; align-items:center;">
+    <span class="badge">☁ CLOUD DASHBOARD</span>
+    <button id="cmd-status" onclick="sendStatusCommand()">📡 REQUEST STATUS</button>
+  </div>
 </header>
 
 <div id="last-update">connecting...</div>
@@ -250,6 +262,38 @@
     });
     if (!r.ok) throw new Error(r.status);
     return r.json();
+  }
+
+  async function sendCommand(deviceId, command, payload = {}) {
+    if (!SUPA_URL || !SUPA_KEY) return;
+    const body = {
+      device_id: deviceId,
+      command: command,
+      payload: payload,
+      executed: false
+    };
+    try {
+      await fetch(`${SUPA_URL}/rest/v1/commands`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPA_KEY,
+          'Authorization': `Bearer ${SUPA_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(body)
+      });
+    } catch(e) {
+      console.error('Command failed:', e);
+    }
+  }
+
+  async function sendStatusCommand() {
+    const deviceId = prompt('Enter device ID (e.g., pi_visionguide_01):', 'pi_visionguide_01');
+    if (deviceId) {
+      await sendCommand(deviceId, 'STATUS', {});
+      alert(`STATUS command sent to ${deviceId}. The Pi will log current status to the cloud.`);
+    }
   }
 
   function fmtTs(ts) {

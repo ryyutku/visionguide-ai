@@ -11,19 +11,25 @@ IMPORTANT_CLASSES = {
     "couch", "potted plant", "bed", "toilet", "door"
 }
 
-CONFIRM_FRAMES  = 3
+CONFIRM_FRAMES = 3
 YOLO_INPUT_SIZE = 320
 
 
 def _find_model() -> tuple[str, str]:
-    """Returns (model_path, task). Uses NCNN if available."""
-    ncnn = "yolov8n_ncnn_model"
-    if os.path.exists(ncnn):
-        print(f"[detector] Using NCNN model: {ncnn}  (faster)")
-        return ncnn, "detect"
-    print("[detector] Using PyTorch model: yolov8n.pt")
-    print("[detector] Tip: run 'python export_model.py' for 2-3x speedup")
-    return "yolov8n.pt", "detect"
+    """Return (model_path, task) preferring INT8 NCNN if available."""
+    int8_ncnn = "yolov8n_int8_ncnn"
+    fp32_ncnn = "yolov8n_ncnn_model"
+
+    if os.path.exists(int8_ncnn):
+        print(f"[detector] Using INT8 quantized NCNN: {int8_ncnn} (fastest)")
+        return int8_ncnn, "detect"
+    elif os.path.exists(fp32_ncnn):
+        print(f"[detector] Using NCNN FP32: {fp32_ncnn} (fast)")
+        return fp32_ncnn, "detect"
+    else:
+        print("[detector] Using PyTorch model: yolov8n.pt")
+        print("[detector] Tip: run 'python export_model.py' for 2-3x speedup")
+        return "yolov8n.pt", "detect"
 
 
 class DetectorTracker:
@@ -33,31 +39,40 @@ class DetectorTracker:
         else:
             path, task = _find_model()
 
-        # Pass task= explicitly to suppress the NCNN guess warning
-        self.model  = YOLO(path, task=task)
+        self.model = YOLO(path, task=task)
         self._smooth: dict[int, tuple] = {}
-        self._seen:   dict[int, int]   = defaultdict(int)
-        self.alpha  = 0.5
+        self._seen: dict[int, int] = defaultdict(int)
+        self.alpha = 0.5
+
+        # Frame skip for extra speed (optional)
+        self._frame_skip_counter = 0
+        self._cached_detections = []
+        self._skip_every = 1  # set to 2 to process every other frame
 
     def get_detections(self, frame):
-        frame = cv2.resize(frame, (640, 480))
-        h, w  = frame.shape[:2]
+        # Optional frame skipping
+        self._frame_skip_counter += 1
+        if self._skip_every > 1 and self._frame_skip_counter % self._skip_every != 0:
+            return frame, self._cached_detections
 
-        l_bound    = w / 3
-        r_bound    = 2 * w / 3
+        frame = cv2.resize(frame, (640, 480))
+        h, w = frame.shape[:2]
+
+        l_bound = w / 3
+        r_bound = 2 * w / 3
         frame_area = w * h
 
         results = self.model.track(
             frame,
-            persist = True,
-            verbose = False,
-            conf    = 0.40,
-            iou     = 0.45,
-            imgsz   = YOLO_INPUT_SIZE,
+            persist=True,
+            verbose=False,
+            conf=0.40,
+            iou=0.45,
+            imgsz=YOLO_INPUT_SIZE,
         )
 
         detections: list = []
-        active_ids: set  = set()
+        active_ids: set = set()
 
         for result in results:
             if result.boxes is None:
@@ -67,8 +82,8 @@ class DetectorTracker:
                     continue
 
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
-                track_id        = int(box.id.item())
-                class_name      = self.model.names[int(box.cls[0])]
+                track_id = int(box.id.item())
+                class_name = self.model.names[int(box.cls[0])]
 
                 if class_name not in IMPORTANT_CLASSES:
                     continue
@@ -77,27 +92,27 @@ class DetectorTracker:
                 self._seen[track_id] += 1
                 active_ids.add(track_id)
 
-                center_x   = (x1 + x2) / 2
-                area       = (x2 - x1) * (y2 - y1)
+                center_x = (x1 + x2) / 2
+                area = (x2 - x1) * (y2 - y1)
                 area_ratio = area / frame_area
 
                 region = (
-                    "left"   if center_x < l_bound  else
-                    "right"  if center_x >= r_bound else
+                    "left" if center_x < l_bound else
+                    "right" if center_x >= r_bound else
                     "center"
                 )
                 proximity = (
-                    "close"  if area_ratio > 0.18 else
+                    "close" if area_ratio > 0.18 else
                     "medium" if area_ratio > 0.05 else
                     "far"
                 )
                 confirmed = self._seen[track_id] >= CONFIRM_FRAMES
 
                 detections.append({
-                    "id":        track_id,
-                    "class":     class_name,
-                    "region":    region,
-                    "area":      area,
+                    "id": track_id,
+                    "class": class_name,
+                    "region": region,
+                    "area": area,
                     "proximity": proximity,
                     "confirmed": confirmed,
                 })
@@ -120,6 +135,7 @@ class DetectorTracker:
         cv2.line(frame, (int(l_bound), 0), (int(l_bound), h), (200, 200, 200), 1)
         cv2.line(frame, (int(r_bound), 0), (int(r_bound), h), (200, 200, 200), 1)
 
+        self._cached_detections = detections
         return frame, detections
 
     def _smooth_bbox(self, track_id, x1, y1, x2, y2):
@@ -128,7 +144,7 @@ class DetectorTracker:
             return x1, y1, x2, y2
         px1, py1, px2, py2 = self._smooth[track_id]
         a = self.alpha
-        s = (a*px1+(1-a)*x1, a*py1+(1-a)*y1,
-             a*px2+(1-a)*x2, a*py2+(1-a)*y2)
+        s = (a * px1 + (1 - a) * x1, a * py1 + (1 - a) * y1,
+             a * px2 + (1 - a) * x2, a * py2 + (1 - a) * y2)
         self._smooth[track_id] = s
         return s

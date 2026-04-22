@@ -116,7 +116,57 @@ def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
     fusion   = SensorFusion()
     cloud    = CloudLogger()
 
-    log.info("Inference ready")
+    # ── Store last state for cloud command handlers ──────────────────────
+    last_state = {
+        "scene_state": None,
+        "detections": [],
+        "fused": None,
+    }
+
+    # ── Register cloud command handlers ──────────────────────────────────
+    def handle_status(payload):
+        """Remote command: immediately log current status to cloud."""
+        log.info("Cloud command: STATUS received")
+        # Use the most recent state captured
+        scene_state = last_state["scene_state"]
+        detections  = last_state["detections"]
+        fused       = last_state["fused"]
+
+        if scene_state is None:
+            log.warning("STATUS command: no state available yet")
+            return
+
+        # Log an alert with "manual status" message
+        cloud.log_alert(
+            message           = "Manual status request (remote)",
+            priority          = 1,
+            zone_states       = scene_state.zones,
+            closest_class     = scene_state.closest_class,
+            closest_region    = scene_state.closest_region,
+            closest_proximity = scene_state.closest_proximity,
+        )
+
+        # Also log a sensor reading
+        cloud.log_sensor(
+            sensor_cm       = fused.sensor_cm if fused else None,
+            sensor_band     = fused.proximity if fused else "none",
+            object_count    = len(detections),
+            confirmed_count = sum(1 for d in detections if d["confirmed"]),
+        )
+
+        log.info("STATUS command: data sent to cloud")
+
+    def handle_set_volume(payload):
+        """Remote command: change speech volume (future enhancement)."""
+        vol = payload.get("volume", 80)
+        log.info("Cloud command: SET_VOLUME to %d%%", vol)
+        # Could extend speech.py to support volume changes
+        # speech.set_volume(vol)
+
+    cloud.register_command_handler("STATUS", handle_status)
+    cloud.register_command_handler("SET_VOLUME", handle_set_volume)
+
+    log.info("Inference ready (cloud commands enabled)")
 
     frames_done = 0
     fps_clock   = time.time()
@@ -135,6 +185,11 @@ def inference_loop(frame_queue: queue.Queue, stop: threading.Event):
         message, priority     = guidance.decide(
             scene_state, detections, speech, fused
         )
+
+        # Store for command handlers
+        last_state["scene_state"] = scene_state
+        last_state["detections"]  = detections
+        last_state["fused"]       = fused
 
         if message:
             log.info("[ALERT p%d] %s", priority, message)
