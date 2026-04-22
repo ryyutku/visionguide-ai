@@ -16,16 +16,21 @@ YOLO_INPUT_SIZE = 320
 
 
 def _find_model() -> tuple[str, str]:
-    """Return (model_path, task) preferring INT8 NCNN if available."""
-    int8_ncnn = "yolov8n_int8_ncnn"
-    fp32_ncnn = "yolov8n_ncnn_model"
+    """Return (model_path, task) preferring fastest available."""
+    # Priority order:
+    # 1. NCNN (fastest on Pi, uses ARM NEON)
+    # 2. TFLite INT8 (quantized, needs tflite-runtime)
+    # 3. PyTorch (slowest, fallback)
 
-    if os.path.exists(int8_ncnn):
-        print(f"[detector] Using INT8 quantized NCNN: {int8_ncnn} (fastest)")
-        return int8_ncnn, "detect"
-    elif os.path.exists(fp32_ncnn):
-        print(f"[detector] Using NCNN FP32: {fp32_ncnn} (fast)")
-        return fp32_ncnn, "detect"
+    ncnn_model = "yolov8n_ncnn_model"
+    tflite_int8 = "yolov8n_int8.tflite"
+
+    if os.path.exists(ncnn_model):
+        print(f"[detector] Using NCNN model: {ncnn_model} (fast)")
+        return ncnn_model, "detect"
+    elif os.path.exists(tflite_int8):
+        print(f"[detector] Using TFLite INT8: {tflite_int8} (quantized)")
+        return tflite_int8, "detect"
     else:
         print("[detector] Using PyTorch model: yolov8n.pt")
         print("[detector] Tip: run 'python export_model.py' for 2-3x speedup")
@@ -44,17 +49,7 @@ class DetectorTracker:
         self._seen: dict[int, int] = defaultdict(int)
         self.alpha = 0.5
 
-        # Frame skip for extra speed (optional)
-        self._frame_skip_counter = 0
-        self._cached_detections = []
-        self._skip_every = 1  # set to 2 to process every other frame
-
     def get_detections(self, frame):
-        # Optional frame skipping
-        self._frame_skip_counter += 1
-        if self._skip_every > 1 and self._frame_skip_counter % self._skip_every != 0:
-            return frame, self._cached_detections
-
         frame = cv2.resize(frame, (640, 480))
         h, w = frame.shape[:2]
 
@@ -135,7 +130,6 @@ class DetectorTracker:
         cv2.line(frame, (int(l_bound), 0), (int(l_bound), h), (200, 200, 200), 1)
         cv2.line(frame, (int(r_bound), 0), (int(r_bound), h), (200, 200, 200), 1)
 
-        self._cached_detections = detections
         return frame, detections
 
     def _smooth_bbox(self, track_id, x1, y1, x2, y2):
