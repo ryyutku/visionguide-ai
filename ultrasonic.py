@@ -24,9 +24,9 @@ import logging
 
 log = logging.getLogger("ultrasonic")
 
-DIST_CRITICAL = 40    # cm — stop immediately
-DIST_CLOSE    = 80    # cm — close warning
-DIST_MEDIUM   = 150   # cm — medium range
+DIST_CRITICAL = 75    # cm — stop immediately
+DIST_CLOSE    = 100    # cm — close warning
+DIST_MEDIUM   = 160   # cm — medium range
 DIST_MAX      = 400   # cm — beyond this is noise, discard
 
 
