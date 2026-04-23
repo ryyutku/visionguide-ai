@@ -17,23 +17,17 @@ YOLO_INPUT_SIZE = 320
 
 def _find_model() -> tuple[str, str]:
     """Return (model_path, task) preferring fastest available."""
-    # Priority order:
-    # 1. NCNN (fastest on Pi, uses ARM NEON)
-    # 2. TFLite INT8 (quantized, needs tflite-runtime)
-    # 3. PyTorch (slowest, fallback)
-
     ncnn_model = "yolov8n_ncnn_model"
     tflite_int8 = "yolov8n_int8.tflite"
 
     if os.path.exists(ncnn_model):
-        print(f"[detector] Using NCNN model: {ncnn_model} (fast)")
+        print(f"[detector] Using NCNN model: {ncnn_model} (FP16 optimized)")
         return ncnn_model, "detect"
     elif os.path.exists(tflite_int8):
-        print(f"[detector] Using TFLite INT8: {tflite_int8} (quantized)")
+        print(f"[detector] Using TFLite INT8: {tflite_int8}")
         return tflite_int8, "detect"
     else:
         print("[detector] Using PyTorch model: yolov8n.pt")
-        print("[detector] Tip: run 'python export_model.py' for 2-3x speedup")
         return "yolov8n.pt", "detect"
 
 
