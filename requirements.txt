@@ -7,7 +7,7 @@ fiftyone==0.25.1
 # YOLOv8 - includes torch, torchvision, opencv automatically
 ultralytics==8.3.0
 
-# PyTorch - CPU version (works on Raspberry Pi and most machines)
+# PyTorch - CPU version (works on Raspberry Pi and most machines) 
 # If you have an Nvidia GPU, get the CUDA version from https://pytorch.org
 torch==2.4.1
 torchvision==0.19.1
