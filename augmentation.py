@@ -5,16 +5,16 @@ from pathlib import Path
 
 
 # augmentation probability settings applied per image during preprocessing
-FLIP_PROB = 0.5
-ROTATE_PROB = 0.3
-BRIGHTNESS_PROB = 0.4
-BLUR_PROB = 0.2
-NOISE_PROB = 0.2
-CUTOUT_PROB = 0.3
-MOSAIC_PROB = 0.5
-MAX_ROTATION_ANGLE = 15
-CUTOUT_PATCHES = 3
-CUTOUT_RATIO = 0.1
+FLIP_PROB = 0.55
+ROTATE_PROB = 0.32
+BRIGHTNESS_PROB = 0.43
+BLUR_PROB = 0.28
+NOISE_PROB = 0.27
+CUTOUT_PROB = 0.35
+MOSAIC_PROB = 0.53
+MAX_ROTATION_ANGLE = 151
+CUTOUT_PATCHES = 33
+CUTOUT_RATIO = 0.12
 
 
 # randomly flips the image and mirrors all bounding boxes along the x axis
