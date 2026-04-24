@@ -4,18 +4,29 @@
 #   Raspberry Pi → GPIO (RPi.GPIO)
 #   Laptop/other → Stub (simulated oscillating distance)
 #
-# Override with env var:  ULTRASONIC_BACKEND=stub  or  ULTRASONIC_BACKEND=gpio
-#
 # Wiring (Pi, BCM numbering):
 #   HC-SR04 VCC  → Pi pin 2  (5V)
 #   HC-SR04 GND  → Pi pin 6  (GND)
 #   HC-SR04 TRIG → GPIO 23   (override: ULTRASONIC_TRIG=XX)
 #   HC-SR04 ECHO → GPIO 24   (override: ULTRASONIC_ECHO=XX)
 #
-#   !! IMPORTANT: The ECHO pin outputs 5V but Pi GPIO is 3.3V max !!
-#   Use a voltage divider on ECHO:
+#   IMPORTANT: voltage divider on ECHO (sensor outputs 5V, Pi GPIO = 3.3V max):
 #       ECHO → 1kΩ → GPIO 24
 #                 ↘ 2kΩ → GND
+#
+# Threshold rationale (latency compensation):
+#   Pipeline latency on Pi 4 ≈ 250–350ms
+#   (sensor poll 60ms + YOLO 160ms + speech startup 50ms + margin)
+#   At walking pace ~1.2 m/s, the user travels ~36cm during processing.
+#   So trigger distances are set ~35cm higher than the desired real-world
+#   warning distance to ensure the alert arrives on time.
+#
+#   DIST_CRITICAL = 75cm  → alert arrives when object is ~40cm away
+#   DIST_CLOSE    = 110cm → alert arrives when object is ~75cm away
+#
+#   MUST stay consistent with guidance.py:
+#     STOP_DISTANCE_CM = 75  (matches DIST_CRITICAL)
+#     CLEAR_SENSOR_CM  = 120 (must be > DIST_CLOSE so clear only fires when path is open)
 
 import os
 import time
@@ -24,9 +35,10 @@ import logging
 
 log = logging.getLogger("ultrasonic")
 
-DIST_CRITICAL = 75    # cm — stop immediately
-DIST_CLOSE    = 100   # cm — close warning
-DIST_MEDIUM   = 160   # cm — medium range
+# ── Distance thresholds (latency-compensated) ─────────────────────────────────
+DIST_CRITICAL = 75    # cm — sensor "critical" band → triggers hard stop
+DIST_CLOSE    = 110   # cm — sensor "close" band
+DIST_MEDIUM   = 160   # cm — sensor "medium" band
 DIST_MAX      = 400   # cm — beyond this is noise, discard
 
 
@@ -70,13 +82,14 @@ class _GPIOSensor(_SensorBase):
         GPIO.setup(self.TRIG, GPIO.OUT)
         GPIO.setup(self.ECHO, GPIO.IN)
         GPIO.output(self.TRIG, False)
-        time.sleep(0.05)   # let sensor settle
+        time.sleep(0.05)
 
         self._latest: float | None = None
         self._lock    = threading.Lock()
         self._running = True
-        # Background thread so sensor never blocks the main camera loop
-        self._thread  = threading.Thread(target=self._loop, daemon=True)
+        self._thread  = threading.Thread(
+            target=self._loop, daemon=True, name="ultrasonic"
+        )
         self._thread.start()
         log.info("GPIO ultrasonic ready  TRIG=%d  ECHO=%d", self.TRIG, self.ECHO)
 
@@ -85,29 +98,26 @@ class _GPIOSensor(_SensorBase):
             cm = self._ping()
             with self._lock:
                 self._latest = cm
-            time.sleep(0.06)   # ~16 Hz — matches camera frame rate
+            time.sleep(0.06)   # ~16 Hz
 
     def _ping(self) -> float | None:
         GPIO = self._gpio
-        # 10µs trigger pulse
         GPIO.output(self.TRIG, True)
         time.sleep(0.00001)
         GPIO.output(self.TRIG, False)
 
-        # Wait for echo start (20ms timeout)
         t = time.time()
         while GPIO.input(self.ECHO) == 0:
             if time.time() - t > 0.02:
                 return None
         t0 = time.time()
 
-        # Wait for echo end (40ms timeout)
         while GPIO.input(self.ECHO) == 1:
             if time.time() - t0 > 0.04:
                 return None
         t1 = time.time()
 
-        cm = (t1 - t0) * 17150   # speed of sound / 2
+        cm = (t1 - t0) * 17150
         return cm if cm < DIST_MAX else None
 
     def read_distance_cm(self) -> float | None:
@@ -121,7 +131,6 @@ class _GPIOSensor(_SensorBase):
 
 
 class _StubSensor(_SensorBase):
-    """Simulates a slowly oscillating distance — useful for logic testing."""
     def __init__(self):
         self._start = time.time()
         self._fixed = None
