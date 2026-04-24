@@ -13,8 +13,8 @@ OUTPUT_DIR = "data/processed"
 TRAIN_SPLIT = 0.8
 VAL_SPLIT = 0.1
 TEST_SPLIT = 0.1
-IMAGE_SIZE = 640
-
+IMAGE_SIZE = 800
+ 
 
 # creates the folder structure yolo expects: images/train, images/val, images/test
 def create_directory_structure(base_dir):
