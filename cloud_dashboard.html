@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VisionGuide — Cloud Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  /* ... keep all existing styles from previous version ... */
+  :root {
+    --bg:      #080c10;
+    --surface: #0d1117;
+    --s2:      #111820;
+    --border:  #1e2d3d;
+    --accent:  #00d4ff;
+    --green:   #0aff9d;
+    --urgent:  #ff4d4d;
+    --warning: #ffaa00;
+    --txt:     #cdd9e5;
+    --muted:   #4a5568;
+    --mono:    'Space Mono', monospace;
+    --sans:    'Syne', sans-serif;
+  }
+  * { box-sizing: border-box; margin:0; padding:0; }
+  body { background: var(--bg); color: var(--txt); font-family: var(--sans); min-height:100vh; }
+
+  #setup {
+    position:fixed; inset:0; background:var(--bg);
+    display:flex; align-items:center; justify-content:center;
+    z-index:100;
+  }
+  .setup-card {
+    background: var(--surface); border:1px solid var(--border);
+    border-radius:8px; padding:36px; width:440px;
+  }
+  .setup-card h2 { font-size:20px; font-weight:800; margin-bottom:6px; color:#fff; }
+  .setup-card p { font-size:12px; color:var(--muted); margin-bottom:24px; }
+  .setup-card label { font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); display:block; margin-bottom:5px; }
+  .setup-card input {
+    width:100%; background:var(--s2); border:1px solid var(--border);
+    color:var(--txt); font-family:var(--mono); font-size:12px;
+    padding:9px 12px; border-radius:4px; margin-bottom:14px; outline:none;
+  }
+  .setup-card input:focus { border-color:var(--accent); }
+  .setup-card button {
+    width:100%; background:var(--accent); color:#000; border:none;
+    font-family:var(--sans); font-size:13px; font-weight:700;
+    padding:11px; border-radius:4px; cursor:pointer;
+  }
+  .setup-card button:hover { opacity:.85; }
+  #setup-err { color:var(--urgent); font-size:11px; margin-top:10px; }
+
+  header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 24px; background:var(--surface);
+    border-bottom:1px solid var(--border);
+  }
+  .logo { display:flex; align-items:center; gap:10px; }
+  .dot {
+    width:9px; height:9px; border-radius:50%;
+    background:var(--green); box-shadow:0 0 8px var(--green);
+    animation: blink 2s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%,100%{opacity:1;box-shadow:0 0 8px var(--green);}
+    50%{opacity:.4;box-shadow:0 0 16px var(--green);}
+  }
+  .logo h1 { font-size:17px; font-weight:800; letter-spacing:.07em; color:#fff; }
+  .logo h1 span { color:var(--accent); }
+  .badge {
+    background:rgba(0,212,255,.1); border:1px solid rgba(0,212,255,.3);
+    color:var(--accent); font-family:var(--mono); font-size:9px;
+    letter-spacing:.1em; padding:3px 9px; border-radius:3px;
+  }
+
+  .session-info {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--green);
+    margin-left: 12px;
+    padding: 3px 8px;
+    background: rgba(10,255,157,0.08);
+    border-radius: 3px;
+    border: 1px solid rgba(10,255,157,0.2);
+  }
+
+  .control-panel {
+    display:flex; align-items:center; gap:12px; margin-left:12px;
+  }
+  .btn {
+    background: var(--s2); border:1px solid var(--border);
+    color: var(--txt); font-family: var(--mono); font-size:9px;
+    font-weight:700; padding:4px 10px; border-radius:3px; cursor:pointer;
+    letter-spacing:.08em; transition: all 0.2s;
+  }
+  .btn:hover { background: var(--border); }
+  .btn.active { background: var(--accent); color:#000; border-color:var(--accent); }
+  .slider-container {
+    display:flex; align-items:center; gap:5px;
+    background:var(--s2); padding:2px 8px; border-radius:3px;
+    border:1px solid var(--border);
+  }
+  .slider-container input { width:70px; }
+  #volume-value { color:var(--accent); font-size:9px; min-width:35px; }
+
+  .main { max-width:1200px; margin:0 auto; padding:20px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:18px; }
+  .card.wide { grid-column: span 3; }
+  .card.two  { grid-column: span 2; }
+  .card-title {
+    font-size:8px; font-weight:600; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--muted); margin-bottom:14px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .card-title::after { content:''; flex:1; height:1px; background:var(--border); }
+
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .stat { background:var(--s2); border:1px solid var(--border); border-radius:4px; padding:12px; }
+  .stat-label { font-size:8px; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
+  .stat-val   { font-family:var(--mono); font-size:28px; font-weight:700; color:#fff; line-height:1; }
+
+  .log-list { display:flex; flex-direction:column; gap:4px; max-height:320px; overflow-y:auto; }
+  .log-entry {
+    display:flex; gap:10px; align-items:flex-start;
+    padding:7px 10px; border-radius:3px; background:var(--s2);
+    border-left:2px solid var(--border);
+  }
+  .lp3 { border-left-color:var(--urgent);  background:rgba(255,77,77,.06); }
+  .lp2 { border-left-color:var(--warning); background:rgba(255,170,0,.05); }
+  .lp1 { border-left-color:var(--accent);  background:rgba(0,212,255,.04); }
+  .ltime { font-family:var(--mono); font-size:9px; color:var(--muted); white-space:nowrap; }
+  .lmsg  { font-family:var(--mono); font-size:11px; }
+  .ltag  { font-family:var(--mono); font-size:9px; padding:1px 6px; border-radius:2px; }
+  .tp3 { background:rgba(255,77,77,.2); color:#ff6b6b; }
+  .tp2 { background:rgba(255,170,0,.2); color:var(--warning); }
+  .tp1 { background:rgba(0,212,255,.2); color:var(--accent); }
+
+  .image-preview { margin-top:10px; text-align:center; }
+  .image-preview img { max-width:100%; max-height:150px; border-radius:4px; border:1px solid var(--border); }
+
+  #sensor-canvas { width:100%; height:120px; display:block; }
+
+  .zone-row { display:flex; gap:8px; margin-bottom:8px; }
+  .zpill {
+    flex:1; text-align:center; padding:8px 4px; border-radius:4px;
+    border:1px solid var(--border);
+    font-family:var(--mono); font-size:9px; font-weight:700;
+    text-transform:uppercase; letter-spacing:.06em;
+  }
+  .zc { color:var(--green);   background:rgba(10,255,157,.06); border-color:rgba(10,255,157,.2); }
+  .zo { color:var(--warning); background:rgba(255,170,0,.06);  border-color:rgba(255,170,0,.2); }
+  .zr { color:var(--urgent);  background:rgba(255,77,77,.06);  border-color:rgba(255,77,77,.2); }
+
+  #last-update { font-family:var(--mono); font-size:10px; color:var(--muted); text-align:right; padding:4px 24px 12px; }
+
+  /* Popup */
+  .image-popup {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--surface);
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    padding: 16px;
+    max-width: 350px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    z-index: 1000;
+    animation: slideIn 0.3s ease;
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(20px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .image-popup.fadeout {
+    animation: fadeOut 0.3s ease forwards;
+  }
+  @keyframes fadeOut {
+    to { opacity: 0; transform: translateX(20px); }
+  }
+  .popup-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .popup-header span {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: .1em;
+  }
+  .popup-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 20px;
+  }
+  .popup-close:hover { color: var(--urgent); }
+  .popup-image {
+    width: 100%;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .popup-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .popup-btn {
+    flex: 1;
+    background: var(--s2);
+    border: 1px solid var(--border);
+    color: var(--txt);
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    padding: 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: center;
+    text-decoration: none;
+  }
+  .popup-btn:hover { background: var(--border); }
+  .popup-btn.primary {
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  ::-webkit-scrollbar { width:3px; }
+  ::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+</style>
+</head>
+<body>
+
+<div id="setup">
+  <div class="setup-card">
+    <h2>VisionGuide Cloud Dashboard</h2>
+    <p>Enter your Supabase project credentials to connect.</p>
+    <label>Supabase Project URL</label>
+    <input id="inp-url" type="text" placeholder="https://xxxx.supabase.co">
+    <label>Anon / Public Key</label>
+    <input id="inp-key" type="text" placeholder="eyJhbGciOi...">
+    <button onclick="connect()">Connect</button>
+    <div id="setup-err"></div>
+  </div>
+</div>
+
+<div id="popup-container"></div>
+
+<header>
+  <div class="logo">
+    <div class="dot"></div>
+    <h1>Vision<span>Guide</span></h1>
+  </div>
+  <div style="display:flex; align-items:center;">
+    <span class="badge">☁ CLOUD DASHBOARD</span>
+    <span class="session-info" id="session-display">No active session</span>
+    <div class="control-panel">
+      <button class="btn" onclick="sendStatusCommand()">📡 STATUS</button>
+      <button class="btn" id="nightmode-btn" onclick="toggleNightMode()">🌙 NIGHT</button>
+      <button class="btn" onclick="requestImage()">📸 CAPTURE</button>
+      <div class="slider-container">
+        <span style="color:var(--muted);">🔊</span>
+        <input type="range" id="volume-slider" min="0" max="200" value="100" onchange="setVolume(this.value)">
+        <span id="volume-value">100</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div id="last-update">connecting...</div>
+
+<div class="main">
+  <div class="card wide">
+    <div class="card-title">Current Session Summary</div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Total Alerts</div><div class="stat-val" id="s-total">0</div></div>
+      <div class="stat"><div class="stat-label">Urgent (P3)</div><div class="stat-val" id="s-urgent" style="color:var(--urgent)">0</div></div>
+      <div class="stat"><div class="stat-label">Warnings (P2)</div><div class="stat-val" id="s-warn" style="color:var(--warning)">0</div></div>
+      <div class="stat"><div class="stat-label">Last Object</div><div class="stat-val" id="s-obj" style="font-size:14px;padding-top:6px">—</div></div>
+    </div>
+  </div>
+
+  <div class="card two">
+    <div class="card-title">Recent Alerts (Current Session)</div>
+    <div class="log-list" id="alert-log"></div>
+    <div class="image-preview" id="image-preview"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Latest Zone State</div>
+    <div class="zone-row">
+      <div class="zpill zc" id="z-left">left<br>—</div>
+      <div class="zpill zc" id="z-center">center<br>—</div>
+      <div class="zpill zc" id="z-right">right<br>—</div>
+    </div>
+    <div class="card-title" style="margin-top:14px">Sensor Distance</div>
+    <canvas id="sensor-canvas"></canvas>
+  </div>
+</div>
+
+<script>
+  let SUPA_URL = '', SUPA_KEY = '';
+  let lastAlertId = 0;
+  let nightModeActive = false;
+  let popupTimeout = null;
+  let currentSessionId = null;
+  const ZONE_CLS = {clear:'zc',occupied:'zo',crowded:'zr'};
+
+  window.onload = () => {
+    const u = localStorage.getItem('vg_url');
+    const k = localStorage.getItem('vg_key');
+    if (u && k) {
+      document.getElementById('inp-url').value = u;
+      document.getElementById('inp-key').value = k;
+    }
+  };
+
+  async function connect() {
+    const url = document.getElementById('inp-url').value.trim().replace(/\/+$/, '');
+    const key = document.getElementById('inp-key').value.trim();
+    const err = document.getElementById('setup-err');
+    if (!url || !key) { err.textContent = 'Both fields required.'; return; }
+    try {
+      const r = await fetch(`${url}/rest/v1/alerts?select=id&limit=1`, {
+        headers: { apikey: key, Authorization: `Bearer ${key}` }
+      });
+      if (!r.ok) { err.textContent = `Connection failed: ${r.status}`; return; }
+    } catch(e) {
+      err.textContent = 'Network error.';
+      return;
+    }
+    SUPA_URL = url; SUPA_KEY = key;
+    localStorage.setItem('vg_url', url);
+    localStorage.setItem('vg_key', key);
+    document.getElementById('setup').style.display = 'none';
+    
+    // Find current session
+    await findCurrentSession();
+    poll();
+  }
+
+  async function findCurrentSession() {
+    try {
+      // Get the most recent session_id
+      const alerts = await supa('alerts', 'select=session_id&order=ts.desc&limit=1');
+      if (alerts.length > 0) {
+        currentSessionId = alerts[0].session_id;
+        document.getElementById('session-display').textContent = 
+          `📋 ${currentSessionId.substring(0, 20)}...`;
+        console.log('Current session:', currentSessionId);
+      } else {
+        document.getElementById('session-display').textContent = '⏳ Waiting for data...';
+      }
+    } catch(e) {
+      console.error('Failed to find session:', e);
+    }
+  }
+
+  async function supa(table, params = '') {
+    const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${params}`, {
+      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
+    });
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }
+
+  async function sendCommand(deviceId, command, payload = {}) {
+    if (!SUPA_URL || !SUPA_KEY) return;
+    const body = { device_id: deviceId, command, payload, executed: false };
+    await fetch(`${SUPA_URL}/rest/v1/commands`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPA_KEY,
+        'Authorization': `Bearer ${SUPA_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify(body)
+    });
+  }
+
+  function getDeviceId() {
+    return prompt('Enter device ID:', 'pi_visionguide_01');
+  }
+
+  function sendStatusCommand() {
+    const id = getDeviceId();
+    if (id) { sendCommand(id, 'STATUS', {}); alert('Status request sent'); }
+  }
+
+  function toggleNightMode() {
+    const id = getDeviceId();
+    if (!id) return;
+    nightModeActive = !nightModeActive;
+    const btn = document.getElementById('nightmode-btn');
+    btn.textContent = nightModeActive ? '☀️ DAY' : '🌙 NIGHT';
+    btn.classList.toggle('active', nightModeActive);
+    sendCommand(id, 'NIGHT_MODE', { enable: nightModeActive });
+  }
+
+  function requestImage() {
+    const id = getDeviceId();
+    if (id) { 
+      sendCommand(id, 'REQUEST_IMAGE', {}); 
+      alert('Image capture requested. Check Pi terminal for status.');
+    }
+  }
+
+  function setVolume(val) {
+    document.getElementById('volume-value').textContent = val;
+    const id = getDeviceId();
+    if (id) { sendCommand(id, 'SET_VOLUME', { volume: parseInt(val) }); }
+  }
+
+  function fmtTs(ts) { return new Date(ts).toLocaleTimeString('en-GB', { hour12:false }); }
+
+  function setZone(id, status) {
+    const el = document.getElementById(id);
+    const name = id.replace('z-','');
+    el.className = `zpill ${ZONE_CLS[status]||'zc'}`;
+    el.innerHTML = `${name}<br>${status||'—'}`;
+  }
+
+  function showImagePopup(imageUrl) {
+    console.log('🎯 Showing popup for:', imageUrl);
+    
+    const existing = document.querySelector('.image-popup');
+    if (existing) existing.remove();
+    if (popupTimeout) clearTimeout(popupTimeout);
+
+    const container = document.getElementById('popup-container');
+    const popup = document.createElement('div');
+    popup.className = 'image-popup';
+    popup.innerHTML = `
+      <div class="popup-header">
+        <span>📸 IMAGE CAPTURED</span>
+        <button class="popup-close" onclick="this.parentElement.parentElement.remove(); if(popupTimeout) clearTimeout(popupTimeout);">×</button>
+      </div>
+      <img class="popup-image" src="${imageUrl}" alt="Captured from Pi" onerror="console.error('Failed to load image:', this.src)">
+      <div class="popup-actions">
+        <a class="popup-btn" href="${imageUrl}" download target="_blank">⬇ DOWNLOAD</a>
+        <button class="popup-btn primary" onclick="window.open('${imageUrl}')">🔍 VIEW</button>
+      </div>
+    `;
+    container.appendChild(popup);
+
+    popupTimeout = setTimeout(() => {
+      if (popup && popup.parentNode) {
+        popup.classList.add('fadeout');
+        setTimeout(() => popup.remove(), 300);
+      }
+    }, 5000);
+  }
+
+  function addAlertRow(a) {
+    const list = document.getElementById('alert-log');
+    const cls  = a.priority >= 3 ? 'lp3' : a.priority === 2 ? 'lp2' : 'lp1';
+    const tcls = a.priority >= 3 ? 'tp3' : a.priority === 2 ? 'tp2' : 'tp1';
+    const e = document.createElement('div');
+    e.className = `log-entry ${cls}`;
+    let msgHtml = a.message;
+
+    console.log('📨 Processing alert:', a.message);
+
+    // Look for ANY URL in the message
+    const urlMatch = a.message.match(/(https?:\/\/[^\s]+)/g);
+    if (urlMatch) {
+      const imageUrl = urlMatch[0];
+      console.log('🖼️ Found URL in alert:', imageUrl);
+      
+      if (imageUrl.includes('supabase.co/storage') || 
+          imageUrl.includes('.jpg') || 
+          imageUrl.includes('.jpeg') || 
+          imageUrl.includes('.png') ||
+          a.message.toLowerCase().includes('image')) {
+        
+        msgHtml = `📸 <a href="${imageUrl}" target="_blank">View captured image</a>`;
+        showImagePopup(imageUrl);
+        document.getElementById('image-preview').innerHTML = `<img src="${imageUrl}" alt="Captured">`;
+      }
+    }
+
+    e.innerHTML = `<span class="ltime">${fmtTs(a.ts)}</span><span class="lmsg">${msgHtml}</span><span class="ltag ${tcls}">${a.closest_class||''}</span>`;
+    list.insertBefore(e, list.firstChild);
+    while (list.children.length > 60) list.removeChild(list.lastChild);
+  }
+
+  const canvas = document.getElementById('sensor-canvas');
+  const ctx = canvas.getContext('2d');
+  let sensorHistory = [];
+
+  function drawSensor() {
+    const W = canvas.offsetWidth, H = 120;
+    canvas.width = W; canvas.height = H;
+    ctx.clearRect(0,0,W,H);
+    if (sensorHistory.length < 2) return;
+    const vals = sensorHistory.map(r=>r.sensor_cm).filter(v=>v!=null);
+    if (!vals.length) return;
+    const max = Math.max(...vals, 200);
+    const pts = sensorHistory.filter(r=>r.sensor_cm!=null).map((r,i,arr)=>({
+      x: (i/(arr.length-1))*W,
+      y: H - (r.sensor_cm/max)*(H-10)-5
+    }));
+    ctx.beginPath(); ctx.moveTo(pts[0].x, H);
+    pts.forEach(p=>ctx.lineTo(p.x,p.y));
+    ctx.lineTo(pts[pts.length-1].x, H); ctx.closePath();
+    ctx.fillStyle = 'rgba(0,212,255,0.08)'; ctx.fill();
+    ctx.beginPath(); pts.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));
+    ctx.strokeStyle = 'rgba(0,212,255,0.8)'; ctx.lineWidth = 1.5; ctx.stroke();
+    const ty = H - (45/max)*(H-10)-5;
+    ctx.beginPath(); ctx.setLineDash([4,4]);
+    ctx.moveTo(0,ty); ctx.lineTo(W,ty);
+    ctx.strokeStyle = 'rgba(255,77,77,0.5)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,77,77,0.7)'; ctx.font = '9px Space Mono'; ctx.fillText('STOP (45cm)',4,ty-3);
+  }
+
+  async function poll() {
+    try {
+      // Try to find current session if not set
+      if (!currentSessionId) {
+        await findCurrentSession();
+      }
+
+      let sessionFilter = '';
+      if (currentSessionId) {
+        sessionFilter = `&session_id=eq.${currentSessionId}`;
+      }
+
+      // Get alerts for CURRENT SESSION ONLY
+      const sessionAlerts = await supa('alerts', `select=priority&order=ts.desc&limit=1000${sessionFilter}`);
+      
+      document.getElementById('s-total').textContent = sessionAlerts.length;
+      document.getElementById('s-urgent').textContent = sessionAlerts.filter(a => a.priority >= 3).length;
+      document.getElementById('s-warn').textContent = sessionAlerts.filter(a => a.priority === 2).length;
+
+      // Get latest 30 for display (from current session)
+      const alerts = await supa('alerts', `select=*&order=ts.desc&limit=30${sessionFilter}`);
+      
+      if (alerts.length) {
+        const latest = alerts[0];
+        document.getElementById('s-obj').textContent = latest.closest_class || '—';
+        setZone('z-left',   latest.zone_left);
+        setZone('z-center', latest.zone_center);
+        setZone('z-right',  latest.zone_right);
+        
+        // Update current session ID if it changed
+        if (latest.session_id !== currentSessionId) {
+          currentSessionId = latest.session_id;
+          document.getElementById('session-display').textContent = 
+            `📋 ${currentSessionId.substring(0, 20)}...`;
+        }
+      }
+
+      // Add new alert rows
+      const newAlerts = alerts.filter(a => a.id > lastAlertId);
+      newAlerts.reverse().forEach(a => addAlertRow(a));
+      if (newAlerts.length) lastAlertId = Math.max(...newAlerts.map(a=>a.id));
+
+      // Sensor data
+      const sensors = await supa('sensor_readings', `select=sensor_cm,ts&order=ts.desc&limit=60${sessionFilter}`);
+      sensorHistory = sensors.reverse();
+      drawSensor();
+
+      document.getElementById('last-update').textContent = 'Last updated: ' + new Date().toLocaleTimeString('en-GB',{hour12:false});
+    } catch(e) {
+      console.error('Poll error:', e);
+      document.getElementById('last-update').textContent = 'Connection error — retrying...';
+    }
+    setTimeout(poll, 2000);
+  }
+</script>
+</body>
+</html>
