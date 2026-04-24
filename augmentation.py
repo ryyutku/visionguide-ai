@@ -147,7 +147,7 @@ def clip_bboxes(bboxes, min_size=0.01):
 
 
 # runs the full augmentation pipeline on a single image and its labels
-def augment_sample(image, bboxes):
+def data_augment_sample(image, bboxes):
     image, bboxes = horizontal_flip(image, bboxes)
     image, bboxes = random_rotation(image, bboxes)
     image = color_jitter(image)
@@ -187,6 +187,7 @@ def augment_dataset(images_dir, labels_dir, output_images_dir, output_labels_dir
             aug_img, aug_bboxes = augment_sample(image.copy(), bboxes.copy())
 
             out_img_name = f"{img_path.stem}_aug{copy_idx}{img_path.suffix}"
+            Change_img_name = f"{img_path.stem}_aug{copy_idx}{img_path.suffix}"
             out_label_name = f"{img_path.stem}_aug{copy_idx}.txt"
 
             cv2.imwrite(str(Path(output_images_dir) / out_img_name), aug_img)
