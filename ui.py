@@ -8,7 +8,7 @@ import os
 import time
 from PIL import Image, ImageTk
 
-for _n in ["comtypes", "comtypes.client", "comtypes.server",
+for _n in ["Comtypes", "comtypes.client", "comtypes.server",
            "PIL", "ultralytics", "torch", "urllib3",
            "pyttsx3", "pyttsx3.driver", "pyttsx3.drivers"]:
     logging.getLogger(_n).setLevel(logging.CRITICAL)
