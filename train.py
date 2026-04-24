@@ -8,7 +8,7 @@ from ultralytics import YOLO
  
 BASE_MODEL = "yolov8n.pt"
 DATA_YAML = "data/processed/data.yaml"
-EPOCHS = 100
+EPOCHS = 20
 BATCH_SIZE = 32
 IMAGE_SIZE = 640
 LEARNING_RATE = 0.02
