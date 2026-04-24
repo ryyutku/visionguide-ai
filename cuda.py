@@ -20,7 +20,7 @@ def run_gpu_test():
 
     # 2. Define a simple Neural Network
     model = nn.Sequential(
-        nn.Linear(2048, 1024),
+        nn.Linear(1024, 1024),
         nn.ReLU(),
         nn.Linear(1024, 1024),
         nn.ReLU(),
