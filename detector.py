@@ -6,7 +6,7 @@ from ultralytics import YOLO
 from collections import defaultdict
 
 IMPORTANT_CLASSES = {
-    "person", "car", "bicycle", "motorcycle",
+    "person", "car", "bicycle", "motorcycle", "counter"
     "bus", "truck", "dog", "chair", "dining table",
     "couch", "potted plant", "bed", "toilet", "door"
 }
