@@ -27,11 +27,11 @@ CONFIG = {
         "couch",
         "bed",
         "dining table",
-    ],
+    ], 
 
     # Number of training images to download per class.
     # 200 = fast demo | 500+ = better accuracy | 1000+ = production quality
-    "train_samples_per_class": 150,
+    "train_samples_per_class": 120,
 
     # Number of validation images to download per class.
     "val_samples_per_class": 20,
