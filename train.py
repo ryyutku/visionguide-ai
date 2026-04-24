@@ -4,14 +4,14 @@ import argparse
 import yaml
 from pathlib import Path
 from ultralytics import YOLO
-
-
+ 
+ 
 BASE_MODEL = "yolov8n.pt"
 DATA_YAML = "data/processed/data.yaml"
 EPOCHS = 100
 BATCH_SIZE = 16
 IMAGE_SIZE = 640
-LEARNING_RATE = 0.01
+LEARNING_RATE = 0.02
 MOMENTUM = 0.937
 WEIGHT_DECAY = 0.0005
 OUTPUT_DIR = "runs/train"
